@@ -32,6 +32,10 @@ export function ChatInput({ disabled, onSend }: ChatInputProps) {
   const submit = useCallback(() => {
     if (!canSend) return
 
+    files.forEach((f) => {
+      if (f.previewUrl) URL.revokeObjectURL(f.previewUrl)
+    })
+
     const filePaths = files
       .filter((f) => f.status === 'done' && f.path)
       .map((f) => `[file:${f.path}]`)
@@ -44,7 +48,7 @@ export function ChatInput({ disabled, onSend }: ChatInputProps) {
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto'
     }
-  }, [canSend, value, files, onSend])
+  }, [disabled, value, files, onSend])
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -171,6 +175,12 @@ export function ChatInput({ disabled, onSend }: ChatInputProps) {
                       <Loader2 className="h-6 w-6 animate-spin text-white" />
                     </div>
                   )}
+                  {/* Error overlay */}
+                  {f.status === 'error' && (
+                    <div className="absolute inset-0 flex items-center justify-center bg-red-500/30">
+                      <X className="h-5 w-5 text-red-400" />
+                    </div>
+                  )}
                   {/* X remove button */}
                   <button
                     type="button"
@@ -204,6 +214,7 @@ export function ChatInput({ disabled, onSend }: ChatInputProps) {
               type="button"
               onClick={() => fileInputRef.current?.click()}
               disabled={disabled}
+              aria-label="파일 첨부"
               className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
             >
               <Paperclip className="h-5 w-5" />
@@ -221,6 +232,7 @@ export function ChatInput({ disabled, onSend }: ChatInputProps) {
               type="button"
               onClick={submit}
               disabled={!canSend}
+              aria-label="메시지 전송"
               className="flex h-8 w-8 items-center justify-center rounded-full bg-foreground text-background transition-opacity disabled:opacity-30"
             >
               <ArrowUp className="h-4 w-4" />
