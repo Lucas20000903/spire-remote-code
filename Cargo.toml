@@ -22,3 +22,4 @@ thiserror = "2"
 tokio-stream = "0.1"
 futures = "0.3"
 dirs = "6"
+clap = { version = "4", features = ["derive"] }

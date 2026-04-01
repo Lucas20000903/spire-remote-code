@@ -15,6 +15,7 @@ use axum::{
     routing::{get, post},
     Router,
 };
+use clap::{Parser, Subcommand};
 use config::AppConfig;
 use db::DbPool;
 use state::AppState;
@@ -25,6 +26,19 @@ use tower_http::cors::{Any, CorsLayer};
 use ws::hub::WsHub;
 
 use bridge::registry::BridgeRegistry;
+
+#[derive(Parser)]
+#[command(name = "claude-web", about = "Claude Code Remote web server")]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Commands>,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Reset auth (delete account, next visit triggers re-setup)
+    ResetAuth,
+}
 
 impl FromRef<AppState> for DbPool {
     fn from_ref(state: &AppState) -> Self {
@@ -48,6 +62,22 @@ async fn ws_handler(
 
 #[tokio::main]
 async fn main() {
+    let cli = Cli::parse();
+
+    match cli.command {
+        Some(Commands::ResetAuth) => {
+            let config = AppConfig::from_env();
+            let db = db::init_db(&config.db_path).unwrap();
+            let conn = db.lock().unwrap();
+            conn.execute("DELETE FROM user", []).unwrap();
+            conn.execute("DELETE FROM config WHERE key = 'jwt_secret'", [])
+                .unwrap();
+            println!("Auth reset. Next web visit will prompt for account setup.");
+            return;
+        }
+        None => {}
+    }
+
     tracing_subscriber::fmt::init();
     let config = AppConfig::from_env();
 
