@@ -1,30 +1,42 @@
+import { useState } from 'react'
 import { useAuth } from '@/hooks/use-auth'
 import { WsProvider } from '@/hooks/use-websocket'
 import { SetupForm } from '@/components/auth/setup-form'
 import { LoginForm } from '@/components/auth/login-form'
 import { ConnectionBanner } from '@/components/layout/connection-banner'
 import { SessionList } from '@/components/session/session-list'
+import { ChatView } from '@/components/chat/chat-view'
 import { Button } from '@/components/ui/button'
 
 function AuthenticatedApp({ logout }: { logout: () => void }) {
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null)
+
   return (
     <WsProvider>
-      <div className="flex min-h-screen flex-col">
+      <div className="flex h-screen flex-col">
         <ConnectionBanner />
-        <header className="flex items-center justify-between border-b px-4 py-2">
-          <h1 className="text-lg font-semibold">Spire</h1>
-          <Button variant="ghost" size="sm" onClick={logout}>
-            Sign Out
-          </Button>
-        </header>
-        <main className="flex-1">
-          <SessionList
-            onSelectSession={(id) => {
-              // TODO: navigate to chat view (Task 11)
-              console.log('select session', id)
-            }}
-          />
-        </main>
+        {selectedSessionId ? (
+          <main className="flex-1 overflow-hidden">
+            <ChatView
+              sessionId={selectedSessionId}
+              onBack={() => setSelectedSessionId(null)}
+            />
+          </main>
+        ) : (
+          <>
+            <header className="flex items-center justify-between border-b px-4 py-2">
+              <h1 className="text-lg font-semibold">Spire</h1>
+              <Button variant="ghost" size="sm" onClick={logout}>
+                Sign Out
+              </Button>
+            </header>
+            <main className="flex-1 overflow-auto">
+              <SessionList
+                onSelectSession={(id) => setSelectedSessionId(id)}
+              />
+            </main>
+          </>
+        )}
       </div>
     </WsProvider>
   )
