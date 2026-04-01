@@ -117,6 +117,8 @@ async fn main() {
 
     let static_dir = config.static_dir.clone();
 
+    upload::ensure_temp_dir();
+
     let state = AppState {
         db,
         registry,
@@ -212,6 +214,7 @@ async fn main() {
 
     // 인증 필요한 라우트
     let protected = Router::new()
+        .route("/api/upload", post(upload::handle_upload))
         .route("/api/push/vapid-key", get(push::routes::get_vapid_key))
         .route("/api/push/subscribe", post(push::routes::subscribe))
         .route(
