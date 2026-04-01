@@ -61,7 +61,7 @@ export function AppLayout() {
 
   return (
     <LayoutContext.Provider value={{ setTitle }}>
-      <div className="flex h-screen overflow-hidden">
+      <div className="flex h-full overflow-hidden">
         {/* ---- Sidebar ---- */}
         {isDesktop ? (
           /* Desktop: sidebar as floating card, always open */
@@ -105,7 +105,6 @@ export function AppLayout() {
           }}
           transition={{ duration: 0.3, ease: [0.25, 0.1, 0.25, 1] }}
           onClick={!isDesktop && sidebarOpen ? () => setSidebarOpen(false) : undefined}
-          onTouchStart={!isDesktop && sidebarOpen ? (e) => { e.preventDefault(); setSidebarOpen(false) } : undefined}
         >
           {/* Dark overlay when sidebar open on mobile */}
           <AnimatePresence>

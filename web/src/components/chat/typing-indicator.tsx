@@ -85,11 +85,11 @@ export function TypingIndicator({ isActive }: TypingIndicatorProps) {
 
   // 진행 중
   return (
-    <div className="flex items-center gap-2.5 text-sm py-2 animate-[spire-pulse_2s_ease-in-out_infinite]">
-      <span className="w-4 text-center font-light">{SPIRE_FRAMES[frameIdx]}</span>
-      <span>{SPIRE_VERBS[verbIdx]}</span>
+    <div className="flex h-10 items-center gap-2.5 text-sm animate-[spire-pulse_2s_ease-in-out_infinite]">
+      <span className="w-4 shrink-0 text-center font-light">{SPIRE_FRAMES[frameIdx]}</span>
+      <span className="truncate">{SPIRE_VERBS[verbIdx]}</span>
       {showTimer && (
-        <span className="opacity-60 text-xs">({formatElapsed(elapsed)})</span>
+        <span className="shrink-0 opacity-60 text-xs">({formatElapsed(elapsed)})</span>
       )}
     </div>
   )

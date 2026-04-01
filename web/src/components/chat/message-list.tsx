@@ -73,6 +73,9 @@ export function MessageList({
   const shouldAutoScroll = useRef(true)
   const toolResultMap = useMemo(() => buildToolResultMap(messages), [messages])
 
+  const prevScrollHeightRef = useRef(0)
+  const isLoadingMore = useRef(false)
+
   const handleScroll = useCallback(() => {
     const el = containerRef.current
     if (!el) return
@@ -80,7 +83,9 @@ export function MessageList({
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
     shouldAutoScroll.current = distanceFromBottom < 100
 
-    if (el.scrollTop < 50 && hasMore && !loading) {
+    if (el.scrollTop < 50 && hasMore && !loading && !isLoadingMore.current) {
+      isLoadingMore.current = true
+      prevScrollHeightRef.current = el.scrollHeight
       onLoadMore()
     }
   }, [hasMore, loading, onLoadMore])
@@ -89,9 +94,16 @@ export function MessageList({
 
   useEffect(() => {
     if (messages.length === 0) return
+    const el = containerRef.current
+
     if (isInitialLoad.current) {
       isInitialLoad.current = false
       bottomRef.current?.scrollIntoView()
+    } else if (isLoadingMore.current && el) {
+      // 이전 메시지 로드 후 스크롤 위치 보존
+      const newScrollHeight = el.scrollHeight
+      el.scrollTop = newScrollHeight - prevScrollHeightRef.current
+      isLoadingMore.current = false
     } else if (shouldAutoScroll.current) {
       bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
     }
