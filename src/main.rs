@@ -214,7 +214,11 @@ async fn main() {
 
     // 인증 필요한 라우트
     let protected = Router::new()
-        .route("/api/upload", post(upload::handle_upload))
+        .route(
+            "/api/upload",
+            post(upload::handle_upload)
+                .layer(axum::extract::DefaultBodyLimit::max(50 * 1024 * 1024)),
+        )
         .route("/api/push/vapid-key", get(push::routes::get_vapid_key))
         .route("/api/push/subscribe", post(push::routes::subscribe))
         .route(

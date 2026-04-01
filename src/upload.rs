@@ -30,45 +30,43 @@ pub fn ensure_temp_dir() {
 }
 
 pub async fn handle_upload(mut multipart: Multipart) -> Result<Json<Value>, AppError> {
-    while let Some(field) = multipart
+    let field = multipart
         .next_field()
         .await
         .map_err(|e| AppError::BadRequest(e.to_string()))?
-    {
-        let original_name = field
-            .file_name()
-            .unwrap_or("file")
-            .to_string();
-        let sanitized = sanitize_filename(&original_name);
+        .ok_or_else(|| AppError::BadRequest("No file provided".into()))?;
 
-        let data = field
-            .bytes()
-            .await
-            .map_err(|e| AppError::BadRequest(e.to_string()))?;
+    let original_name = field
+        .file_name()
+        .unwrap_or("file")
+        .to_string();
+    let sanitized = sanitize_filename(&original_name);
 
-        if data.len() > MAX_FILE_SIZE {
-            return Err(AppError::PayloadTooLarge);
-        }
+    let data = field
+        .bytes()
+        .await
+        .map_err(|e| AppError::BadRequest(e.to_string()))?;
 
-        let uuid = uuid::Uuid::new_v4();
-        let filename = format!("{}-{}", uuid, sanitized);
-        let path = temp_dir().join(&filename);
-
-        tokio::fs::write(&path, &data)
-            .await
-            .map_err(|e| AppError::Internal(e.into()))?;
-
-        let abs_path = path
-            .canonicalize()
-            .unwrap_or(path)
-            .to_string_lossy()
-            .to_string();
-
-        return Ok(Json(json!({
-            "path": abs_path,
-            "name": original_name,
-        })));
+    if data.len() > MAX_FILE_SIZE {
+        return Err(AppError::PayloadTooLarge);
     }
 
-    Err(AppError::BadRequest("No file provided".into()))
+    let uuid = uuid::Uuid::new_v4();
+    let filename = format!("{}-{}", uuid, sanitized);
+    let path = temp_dir().join(&filename);
+
+    tokio::fs::write(&path, &data)
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
+
+    let abs_path = path
+        .canonicalize()
+        .unwrap_or(path)
+        .to_string_lossy()
+        .to_string();
+
+    Ok(Json(json!({
+        "path": abs_path,
+        "name": original_name,
+    })))
 }
