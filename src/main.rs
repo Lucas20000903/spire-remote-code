@@ -3,23 +3,26 @@ mod bridge;
 mod config;
 mod db;
 mod error;
+mod jsonl;
+mod session;
+mod state;
+mod ws;
 
 use axum::{
-    extract::FromRef,
+    extract::{ws::WebSocketUpgrade, FromRef, State},
+    response::IntoResponse,
     routing::{get, post},
     Router,
 };
 use config::AppConfig;
 use db::DbPool;
+use state::AppState;
+use std::collections::HashMap;
 use std::sync::Arc;
+use tokio::sync::RwLock;
+use ws::hub::WsHub;
 
 use bridge::registry::BridgeRegistry;
-
-#[derive(Clone)]
-pub struct AppState {
-    pub db: DbPool,
-    pub registry: Arc<BridgeRegistry>,
-}
 
 impl FromRef<AppState> for DbPool {
     fn from_ref(state: &AppState) -> Self {
@@ -33,6 +36,14 @@ impl FromRef<AppState> for Arc<BridgeRegistry> {
     }
 }
 
+async fn ws_handler(
+    ws_upgrade: WebSocketUpgrade,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    let state = Arc::new(state);
+    ws_upgrade.on_upgrade(move |socket| ws::handler::handle_ws(socket, state))
+}
+
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
@@ -40,11 +51,21 @@ async fn main() {
 
     let db = db::init_db(&config.db_path).expect("failed to initialize database");
     let registry = BridgeRegistry::new();
+    let ws_hub = WsHub::new();
 
-    let state = AppState { db, registry };
+    let port = config.port;
+
+    let state = AppState {
+        db,
+        registry,
+        ws_hub,
+        config,
+        bridge_senders: Arc::new(RwLock::new(HashMap::new())),
+    };
 
     let app = Router::new()
         .route("/health", get(|| async { "ok" }))
+        .route("/ws", get(ws_handler))
         .route("/api/auth/status", get(auth::routes::check_status))
         .route("/api/auth/setup", post(auth::routes::setup))
         .route("/api/auth/login", post(auth::routes::login))
@@ -59,7 +80,7 @@ async fn main() {
         .route("/api/bridges/stream", get(bridge::sse::bridge_stream))
         .with_state(state);
 
-    let addr = format!("0.0.0.0:{}", config.port);
+    let addr = format!("0.0.0.0:{}", port);
     tracing::info!("listening on {}", addr);
     let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();
