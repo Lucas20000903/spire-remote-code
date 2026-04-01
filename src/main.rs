@@ -4,6 +4,7 @@ mod config;
 mod db;
 mod error;
 mod jsonl;
+mod push;
 mod session;
 mod state;
 mod ws;
@@ -158,6 +159,8 @@ async fn main() {
             post(bridge::routes::update_session),
         )
         .route("/api/bridges/stream", get(bridge::sse::bridge_stream))
+        .route("/api/push/vapid-key", get(push::routes::get_vapid_key))
+        .route("/api/push/subscribe", post(push::routes::subscribe))
         .route(
             "/api/projects",
             get(|State(state): State<AppState>| async move {
