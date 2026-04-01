@@ -3,3 +3,4 @@ bridge/node_modules/
 bridge/bun.lock
 web/node_modules/
 web/dist/
+.temp/
