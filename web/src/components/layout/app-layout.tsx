@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'motion/react'
 
 import { SidebarContent } from './sidebar'
 import { ConnectionBanner } from './connection-banner'
+import { useSessions } from '@/hooks/use-sessions'
 import { Menu } from 'lucide-react'
 
 interface HeaderTitle {
@@ -35,6 +36,16 @@ function useIsDesktop() {
     return () => mq.removeEventListener('change', handler)
   }, [])
   return isDesktop
+}
+
+function CompletedBadge() {
+  const { completedCount } = useSessions()
+  if (completedCount === 0) return null
+  return (
+    <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-green-500 px-1 text-[10px] font-bold text-white">
+      {completedCount}
+    </span>
+  )
 }
 
 export function AppLayout() {
@@ -94,6 +105,7 @@ export function AppLayout() {
           }}
           transition={{ duration: 0.3, ease: [0.25, 0.1, 0.25, 1] }}
           onClick={!isDesktop && sidebarOpen ? () => setSidebarOpen(false) : undefined}
+          onTouchStart={!isDesktop && sidebarOpen ? (e) => { e.preventDefault(); setSidebarOpen(false) } : undefined}
         >
           {/* Dark overlay when sidebar open on mobile */}
           <AnimatePresence>
@@ -123,9 +135,10 @@ export function AppLayout() {
             {!isDesktop && (
               <button
                 onClick={() => setSidebarOpen(!sidebarOpen)}
-                className="pointer-events-auto flex h-10 w-10 shrink-0 aspect-square items-center justify-center rounded-full bg-background/75 backdrop-blur-xl text-muted-foreground hover:text-foreground gradient-border"
+                className="pointer-events-auto relative flex h-10 w-10 shrink-0 aspect-square items-center justify-center rounded-full bg-background/75 backdrop-blur-xl text-muted-foreground hover:text-foreground gradient-border"
               >
                 <Menu className="h-4 w-4" />
+                <CompletedBadge />
               </button>
             )}
             {title && (

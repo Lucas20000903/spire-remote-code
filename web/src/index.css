@@ -5,6 +5,12 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* Prevent horizontal overscroll on mobile */
+html, body {
+  overscroll-behavior-x: none;
+  overflow-x: hidden;
+}
+
 @theme inline {
     --font-heading: var(--font-sans);
     --font-sans: 'Pretendard Variable', Pretendard, sans-serif;
@@ -128,6 +134,12 @@ code, kbd, samp, pre {
 .prose :not(pre) > code {
   padding-block: 0 !important;
   font-size: inherit !important;
+}
+
+/* Session progress shimmer */
+@keyframes progress-shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(200%); }
 }
 
 /* Spire typing pulse: orange to muted */

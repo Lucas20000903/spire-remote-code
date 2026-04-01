@@ -20,12 +20,36 @@ export type WsServerMessage =
   | { type: 'history'; session_id: string; messages: TranscriptEntry[] }
   | { type: 'error'; message: string }
 
+export type SessionStatus = 'idle' | 'in-progress' | 'completed' | 'pending'
+
 export interface SessionInfo {
   id: string | null
   cwd: string
   port: number
   bridge_id: string
   lastUserMessage?: string
+  status?: SessionStatus
+}
+
+/** jsonl_update 메시지 배열에서 세션 상태 추론 */
+export function deriveSessionStatus(messages: TranscriptEntry[]): SessionStatus | null {
+  // 뒤에서부터 실제 대화 메시지 찾기
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i]
+    const c = m.message?.content
+    if (typeof c === 'string' && isSystemMessage(c)) continue
+
+    if (m.type === 'assistant' && m.message) {
+      if (m.message.stop_reason === 'end_turn') return 'completed'
+      if (m.message.stop_reason === 'tool_use' || m.message.stop_reason === null) return 'in-progress'
+    }
+    if (m.type === 'user') {
+      // tool_result만 있는 메시지는 건너뛰기
+      if (Array.isArray(c) && c.every((b) => b.type === 'tool_result')) continue
+      return 'in-progress'
+    }
+  }
+  return null // 판단 불가 → 기존 상태 유지
 }
 
 export interface TranscriptEntry {

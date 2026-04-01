@@ -1,6 +1,7 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { useAuth } from '@/hooks/use-auth'
 import { WsProvider } from '@/hooks/use-websocket'
+import { SessionsProvider } from '@/hooks/use-sessions'
 import { SetupForm } from '@/components/auth/setup-form'
 import { LoginForm } from '@/components/auth/login-form'
 import { AppLayout } from '@/components/layout/app-layout'
@@ -10,6 +11,7 @@ import { ChatIntro } from '@/components/chat/chat-intro'
 function AuthenticatedApp() {
   return (
     <WsProvider>
+      <SessionsProvider>
       <Routes>
         <Route element={<AppLayout />}>
           <Route path="/chat/intro" element={<ChatIntro />} />
@@ -17,6 +19,7 @@ function AuthenticatedApp() {
           <Route path="*" element={<Navigate to="/chat/intro" replace />} />
         </Route>
       </Routes>
+      </SessionsProvider>
     </WsProvider>
   )
 }
