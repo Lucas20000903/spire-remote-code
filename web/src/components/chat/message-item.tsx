@@ -1,96 +1,235 @@
-import type { TranscriptEntry, ContentBlock } from '@/lib/types'
+import { useCallback, type ReactNode } from 'react'
+import type { TranscriptEntry, ContentBlock, ToolResultMap } from '@/lib/types'
+import { isInternalContent, extractChannelContent, extractCommandInfo, extractStdout } from '@/lib/types'
+import { debugSelection } from '@/lib/debug-selection'
 import { TextBlock } from './blocks/text-block'
 import { ThinkingBlock } from './blocks/thinking-block'
 import { ToolUseBlock } from './blocks/tool-use-block'
-import { ToolResultBlock } from './blocks/tool-result-block'
+import { ToolUseGroup } from './blocks/tool-use-group'
 import { ImageBlock } from './blocks/image-block'
 
 interface MessageItemProps {
   entry: TranscriptEntry
+  toolResultMap?: ToolResultMap
+  nextTimestamp?: string
+  isHistorical?: boolean
+  prevEntry?: TranscriptEntry
 }
 
-/** Collect tool_use IDs that have a matching tool_result in the same content array */
-function collectResolvedToolUseIds(content: ContentBlock[]): Set<string> {
-  const ids = new Set<string>()
-  for (const block of content) {
-    if (block.type === 'tool_result') {
-      ids.add(block.tool_use_id)
+/** 연속 tool_use를 그룹화하여 렌더링 */
+function renderBlocks(
+  blocks: ContentBlock[],
+  toolResultMap?: ToolResultMap,
+  thinkingDurationMs?: number,
+  isHistorical?: boolean,
+): ReactNode[] {
+  const result: ReactNode[] = []
+  let i = 0
+
+  while (i < blocks.length) {
+    const block = blocks[i]
+
+    if (block.type === 'tool_use') {
+      // 연속된 tool_use 수집
+      const group: { id: string; name: string; input: Record<string, unknown> }[] = []
+      while (i < blocks.length && blocks[i].type === 'tool_use') {
+        const t = blocks[i] as Extract<ContentBlock, { type: 'tool_use' }>
+        group.push({ id: t.id, name: t.name, input: t.input })
+        i++
+      }
+      if (group.length === 1) {
+        const t = group[0]
+        const res = toolResultMap?.get(t.id)
+        result.push(
+          <ToolUseBlock
+            key={t.id}
+            id={t.id}
+            name={t.name}
+            input={t.input}
+            hasResult={!!res}
+            result={res}
+            isHistorical={isHistorical}
+          />
+        )
+      } else {
+        result.push(
+          <ToolUseGroup
+            key={group[0].id}
+            tools={group}
+            toolResultMap={toolResultMap}
+            isHistorical={isHistorical}
+          />
+        )
+      }
+      continue
+    }
+
+    switch (block.type) {
+      case 'text':
+        result.push(<TextBlock key={i} text={block.text} />)
+        break
+      case 'thinking':
+        result.push(<ThinkingBlock key={i} thinking={block.thinking} durationMs={thinkingDurationMs} />)
+        break
+      case 'image':
+        result.push(<ImageBlock key={i} source={block.source} />)
+        break
+      case 'tool_result':
+        break
+    }
+    i++
+  }
+
+  return result
+}
+
+/** 실제 사용자 입력인지 판별 */
+function isActualUserMessage(entry: TranscriptEntry): boolean {
+  if (entry.type !== 'user') return false
+  if (!entry.message) return false
+  const { content } = entry.message
+  if (typeof content === 'string') return true
+  if (Array.isArray(content)) {
+    const hasOnlyToolResults = content.every((b) => b.type === 'tool_result')
+    if (hasOnlyToolResults) return false
+    return content.some((b) => b.type === 'text')
+  }
+  return true
+}
+
+/** thinking 블록만 있는 메시지인지 */
+function isThinkingOnly(entry: TranscriptEntry): boolean {
+  if (!entry.message) return false
+  const { content } = entry.message
+  if (!Array.isArray(content)) return false
+  return content.every((b) => b.type === 'thinking')
+}
+
+/** [Request interrupted] 메시지인지 */
+function isInterruptMessage(entry: TranscriptEntry): boolean {
+  if (entry.type !== 'user' || !entry.message) return false
+  const { content } = entry.message
+  if (typeof content === 'string') return content.includes('[Request interrupted')
+  if (Array.isArray(content)) {
+    return content.some((b) => b.type === 'text' && (b as any).text?.includes('[Request interrupted'))
+  }
+  return false
+}
+
+/** 이전 assistant 메시지에서 중단된 작업 설명 추출 */
+function interruptedDescription(prev?: TranscriptEntry): string {
+  if (!prev?.message || !Array.isArray(prev.message.content)) return '작업 중단됨'
+  const content = prev.message.content
+  // 마지막 tool_use 찾기
+  for (let i = content.length - 1; i >= 0; i--) {
+    const b = content[i]
+    if (b.type === 'tool_use') {
+      const t = b as Extract<ContentBlock, { type: 'tool_use' }>
+      const desc = typeof t.input?.description === 'string' ? t.input.description : ''
+      return desc || `${t.name} 중단됨`
     }
   }
-  return ids
+  // text가 있으면 응답 중단
+  if (content.some((b) => b.type === 'text')) return '응답 중단됨'
+  if (content.some((b) => b.type === 'thinking')) return '생각 중단됨'
+  return '작업 중단됨'
 }
 
-function renderBlock(
-  block: ContentBlock,
-  index: number,
-  resolvedIds: Set<string>
-) {
-  switch (block.type) {
-    case 'text':
-      return <TextBlock key={index} text={block.text} />
-    case 'thinking':
-      return <ThinkingBlock key={index} thinking={block.thinking} />
-    case 'tool_use':
-      return (
-        <ToolUseBlock
-          key={index}
-          id={block.id}
-          name={block.name}
-          input={block.input}
-          hasResult={resolvedIds.has(block.id)}
-        />
-      )
-    case 'tool_result':
-      return (
-        <ToolResultBlock
-          key={index}
-          toolUseId={block.tool_use_id}
-          content={block.content}
-          isError={block.is_error}
-        />
-      )
-    case 'image':
-      return <ImageBlock key={index} source={block.source} />
-    default:
-      return null
-  }
-}
-
-function formatTime(timestamp: string): string {
-  try {
-    const d = new Date(timestamp)
-    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-  } catch {
-    return ''
-  }
-}
-
-export function MessageItem({ entry }: MessageItemProps) {
-  const isUser = entry.type === 'user'
+export function MessageItem({ entry, toolResultMap, nextTimestamp, isHistorical, prevEntry }: MessageItemProps) {
+  if (!entry.message) return null
   const { content } = entry.message
 
+  if (typeof content === 'string' && isInternalContent(content)) return null
+
+  // 특수 메시지 처리
+  let displayContent = content
+  if (typeof content === 'string') {
+    // channel 메시지 → 실제 텍스트 추출
+    const channelText = extractChannelContent(content)
+    if (channelText !== null) {
+      displayContent = channelText
+    }
+
+    // CLI 명령 메시지 → 컴팩트 블록
+    const cmdInfo = extractCommandInfo(content)
+    if (cmdInfo) {
+      return (
+        <div className="py-1 flex items-center gap-1.5 text-[13px] text-muted-foreground">
+          <span className="font-mono text-foreground/70">{cmdInfo.name}</span>
+          {cmdInfo.stdout && (
+            <span className="truncate">→ {cmdInfo.stdout}</span>
+          )}
+        </div>
+      )
+    }
+
+    // stdout만 있는 메시지 → 컴팩트 블록
+    const stdout = extractStdout(content)
+    if (stdout !== null) {
+      return (
+        <div className="py-1 text-[13px] text-muted-foreground">
+          <span className="truncate">{stdout}</span>
+        </div>
+      )
+    }
+  }
+
+  // 인터럽트 메시지 → 컴팩트 블록으로 표시
+  if (isInterruptMessage(entry)) {
+    const desc = interruptedDescription(prevEntry)
+    return (
+      <div className="py-1 flex items-center gap-1.5 text-[13px] text-muted-foreground">
+        <span className="text-destructive">⊘</span>
+        <span>{desc}</span>
+      </div>
+    )
+  }
+
+  const isUser = isActualUserMessage(entry)
+
+  let thinkingDurationMs: number | undefined
+  if (isThinkingOnly(entry) && nextTimestamp) {
+    const start = new Date(entry.timestamp).getTime()
+    const end = new Date(nextTimestamp).getTime()
+    if (end > start) thinkingDurationMs = end - start
+  }
+
+  const handleDebugToggle = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    debugSelection.toggle(entry, e.target.checked)
+  }, [entry])
+
+  const blocks = typeof displayContent === 'string' ? (
+    <TextBlock text={displayContent} />
+  ) : (
+    renderBlocks(displayContent, toolResultMap, thinkingDurationMs, isHistorical)
+  )
+
+  const checkbox = (
+    <input
+      type="checkbox"
+      onChange={handleDebugToggle}
+      className="opacity-0 group-hover/entry:opacity-100 transition-opacity cursor-pointer accent-foreground"
+      title="콘솔에 원본 데이터 출력"
+    />
+  )
+
+  if (isUser) {
+    return (
+      <div className="group/entry flex items-center justify-end gap-1">
+        <div className="max-w-[85%] overflow-hidden rounded-2xl bg-secondary px-4 py-2.5 text-secondary-foreground break-words">
+          <div className="space-y-2 text-sm">{blocks}</div>
+        </div>
+        {checkbox}
+      </div>
+    )
+  }
+
   return (
-    <div className={`flex flex-col gap-1 ${isUser ? 'items-end' : 'items-start'}`}>
-      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-        <span className="font-medium">{isUser ? 'You' : 'Claude'}</span>
-        <span>{formatTime(entry.timestamp)}</span>
+    <div className="group/entry flex items-start gap-1">
+      <div className="max-w-full flex-1">
+        <div className="space-y-2 text-sm text-foreground">{blocks}</div>
       </div>
-      <div
-        className={`max-w-[85%] space-y-2 rounded-lg px-3 py-2 ${
-          isUser
-            ? 'bg-primary text-primary-foreground'
-            : 'bg-muted/50'
-        }`}
-      >
-        {typeof content === 'string' ? (
-          <TextBlock text={content} />
-        ) : (
-          (() => {
-            const resolvedIds = collectResolvedToolUseIds(content)
-            return content.map((block, i) => renderBlock(block, i, resolvedIds))
-          })()
-        )}
-      </div>
+      {checkbox}
     </div>
   )
 }

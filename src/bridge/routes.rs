@@ -30,15 +30,6 @@ pub struct BridgeReply {
     pub text: String,
 }
 
-#[derive(Deserialize)]
-pub struct BridgePermissionRequest {
-    pub port: u16,
-    pub request_id: String,
-    pub tool_name: String,
-    pub description: String,
-    pub input_preview: String,
-}
-
 pub async fn register(
     State(registry): State<Arc<BridgeRegistry>>,
     Json(req): Json<RegisterRequest>,

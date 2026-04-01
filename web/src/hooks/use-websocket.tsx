@@ -46,7 +46,10 @@ export function WsProvider({ children }: { children: ReactNode }) {
     (handler: (msg: WsServerMessage) => void) => {
       return clientRef.current?.onMessage(handler) ?? (() => {})
     },
-    [],
+    // status를 dep에 넣어서, connected 되면 onMessage가 새로 생성되어
+    // consumer의 useEffect가 재실행 → 핸들러가 실제 client에 등록됨
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [status],
   )
 
   return (

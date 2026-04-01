@@ -22,12 +22,14 @@ function isImageFile(name: string) {
 export function ChatInput({ disabled, onSend }: ChatInputProps) {
   const [value, setValue] = useState('')
   const [files, setFiles] = useState<UploadedFile[]>([])
+  const [focused, setFocused] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const isUploading = files.some((f) => f.status === 'uploading')
   const hasContent = value.trim().length > 0 || files.some((f) => f.status === 'done')
   const canSend = hasContent && !isUploading && !disabled
+  const active = focused || hasContent || files.length > 0
 
   const submit = useCallback(() => {
     if (!canSend) return
@@ -65,7 +67,7 @@ export function ChatInput({ disabled, onSend }: ChatInputProps) {
   }
 
   const uploadFile = async (file: File) => {
-    const id = crypto.randomUUID()
+    const id = Math.random().toString(36).slice(2) + Date.now().toString(36)
     const abortController = new AbortController()
     const previewUrl = isImageFile(file.name)
       ? URL.createObjectURL(file)
@@ -139,10 +141,10 @@ export function ChatInput({ disabled, onSend }: ChatInputProps) {
   }
 
   return (
-    <div className="p-3 pb-4">
-      <div className="mx-auto max-w-3xl">
+    <div className={`p-4 transition-[padding] duration-200 ${active ? '' : 'px-6'}`}>
+      <div className="mx-auto max-w-4xl">
         <div
-          className="flex flex-col gap-2 rounded-3xl border bg-muted/30 px-4 py-3 focus-within:border-ring"
+          className={`flex flex-col gap-2 rounded-3xl bg-background/80 backdrop-blur-xl border border-muted px-4 py-3 transition-colors duration-200`}
           onDragOver={(e) => e.preventDefault()}
           onDrop={(e) => e.preventDefault()}
         >
@@ -201,10 +203,12 @@ export function ChatInput({ disabled, onSend }: ChatInputProps) {
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={handleKeyDown}
             onInput={handleInput}
+            onFocus={() => setFocused(true)}
+            onBlur={() => setFocused(false)}
             placeholder="메시지를 입력하세요..."
             disabled={disabled}
             rows={1}
-            className="w-full resize-none bg-transparent text-sm leading-relaxed placeholder:text-muted-foreground focus:outline-none disabled:opacity-50"
+            className="w-full resize-none bg-transparent text-sm leading-relaxed placeholder:text-muted-foreground focus:outline-none disabled:opacity-50 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           />
 
           {/* Bottom toolbar */}

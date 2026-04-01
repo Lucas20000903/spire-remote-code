@@ -42,6 +42,25 @@ impl BridgeRegistry {
         cwd: String,
         pid: u32,
     ) -> String {
+        // 같은 pid의 기존 등록이 있으면 재사용 (MCP 재연결 시 bridge_id 유지)
+        {
+            let mut bridges = self.bridges.write().unwrap();
+            if let Some(existing) = bridges.values_mut().find(|b| b.pid == pid) {
+                let id = existing.id.clone();
+                existing.port = port;
+                existing.cwd = cwd;
+                existing.registered_at = chrono::Utc::now();
+                if session_id.is_some() {
+                    existing.session_id = session_id;
+                }
+                let info = existing.clone();
+                tracing::info!("bridge reused: {} (pid={}, port={})", id, pid, port);
+                let _ = self.event_tx.send(BridgeEvent::Registered(info));
+                return id;
+            }
+        }
+        tracing::info!("bridge new: cwd={}, port={}, pid={}", cwd, port, pid);
+
         let id = format!("br-{}", uuid::Uuid::new_v4().as_simple());
         let info = BridgeInfo {
             id: id.clone(),
@@ -72,9 +91,16 @@ impl BridgeRegistry {
     }
 
     pub fn update_session(&self, id: &str, session_id: String) {
-        if let Some(bridge) = self.bridges.write().unwrap().get_mut(id) {
+        let mut bridges = self.bridges.write().unwrap();
+        // Don't assign if another bridge already has this session_id
+        let already_assigned = bridges.values().any(|b| b.session_id.as_deref() == Some(&session_id) && b.id != id);
+        if already_assigned {
+            return;
+        }
+        if let Some(bridge) = bridges.get_mut(id) {
             bridge.session_id = Some(session_id.clone());
         }
+        drop(bridges);
         let _ = self.event_tx.send(BridgeEvent::SessionUpdated {
             bridge_id: id.to_string(),
             session_id,

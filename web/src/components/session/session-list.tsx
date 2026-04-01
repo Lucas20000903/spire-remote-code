@@ -1,13 +1,11 @@
+import { useNavigate } from 'react-router-dom'
 import { useSessions } from '@/hooks/use-sessions'
 import { SessionItem } from './session-item'
 import { NewSession } from './new-session'
 
-interface SessionListProps {
-  onSelectSession?: (sessionId: string) => void
-}
-
-export function SessionList({ onSelectSession }: SessionListProps) {
+export function SessionList() {
   const { active, recent, createSession } = useSessions()
+  const navigate = useNavigate()
 
   return (
     <div className="mx-auto w-full max-w-md space-y-6 p-4">
@@ -23,7 +21,7 @@ export function SessionList({ onSelectSession }: SessionListProps) {
               <SessionItem
                 key={s.bridge_id}
                 session={s}
-                onClick={() => s.id && onSelectSession?.(s.id)}
+                onClick={() => navigate(`/chat/${s.bridge_id}`)}
               />
             ))}
           </div>
@@ -40,7 +38,7 @@ export function SessionList({ onSelectSession }: SessionListProps) {
               <SessionItem
                 key={s.bridge_id}
                 session={s}
-                onClick={() => s.id && onSelectSession?.(s.id)}
+                onClick={() => navigate(`/chat/${s.bridge_id}`)}
               />
             ))}
           </div>

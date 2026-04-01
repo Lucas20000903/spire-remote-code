@@ -42,3 +42,22 @@ export async function fetchProjects() {
   const res = await fetch(`${BASE}/api/projects`, { headers: headers() })
   return res.json()
 }
+
+export async function fetchFavorites(): Promise<string[]> {
+  const res = await fetch(`${BASE}/api/favorites`, { headers: headers() })
+  const data = await res.json()
+  return data.favorites || []
+}
+
+export async function addFavorite(cwd: string) {
+  await fetch(`${BASE}/api/favorites`, {
+    method: 'POST', headers: headers(),
+    body: JSON.stringify({ cwd }),
+  })
+}
+
+export async function removeFavorite(cwd: string) {
+  await fetch(`${BASE}/api/favorites/${encodeURIComponent(cwd)}`, {
+    method: 'DELETE', headers: headers(),
+  })
+}

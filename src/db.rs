@@ -29,6 +29,11 @@ pub fn init_db(path: &Path) -> anyhow::Result<DbPool> {
             auth TEXT NOT NULL,
             created_at TEXT NOT NULL DEFAULT (datetime('now'))
         );
+        CREATE TABLE IF NOT EXISTS favorite (
+            id INTEGER PRIMARY KEY,
+            cwd TEXT UNIQUE NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
     ",
     )?;
     Ok(Arc::new(Mutex::new(conn)))

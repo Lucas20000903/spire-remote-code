@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
-import { ListToolsRequestSchema, CallToolRequestSchema } from '@modelcontextprotocol/sdk/types.js'
+import { ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js'
 import { z } from 'zod'
 
 // --- Config ---
@@ -112,7 +112,7 @@ async function handleSSEEvent(type: string, data: any, mcp: Server) {
 
 // --- MCP Server ---
 const mcp = new Server(
-  { name: 'webapp-bridge', version: '0.1.0' },
+  { name: 'spire', version: '0.1.0' },
   {
     capabilities: {
       experimental: {
@@ -122,40 +122,13 @@ const mcp = new Server(
       tools: {},
     },
     instructions:
-      'Messages arrive as <channel source="webapp-bridge" chat_id="...">. ' +
-      'Reply with the reply tool, passing the chat_id from the tag.',
+      'Messages from the user\'s phone arrive as <channel source="spire" chat_id="...">. ' +
+      'Respond normally — the user will see your response through the JSONL transcript.',
   },
 )
 
-// Reply tool
-mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
-  tools: [{
-    name: 'reply',
-    description: 'Send a message back through the web app',
-    inputSchema: {
-      type: 'object' as const,
-      properties: {
-        chat_id: { type: 'string' as const, description: 'The conversation to reply in' },
-        text: { type: 'string' as const, description: 'The message to send' },
-      },
-      required: ['chat_id', 'text'],
-    },
-  }],
-}))
-
-mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
-  if (req.params.name === 'reply') {
-    const { chat_id, text } = req.params.arguments as { chat_id: string; text: string }
-    // Forward to Rust server
-    await fetch(`${RUST_SERVER}/api/bridges/reply`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ port: listenPort, chat_id, text }),
-    })
-    return { content: [{ type: 'text', text: 'sent' }] }
-  }
-  throw new Error(`unknown tool: ${req.params.name}`)
-})
+// No reply tool — conversation is read from JSONL, not relayed through the bridge
+mcp.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [] }))
 
 // Permission relay
 const PermissionRequestSchema = z.object({
@@ -186,5 +159,6 @@ mcp.setNotificationHandler(PermissionRequestSchema, async ({ params }) => {
 const listenPort = await findFreePort()
 bridgeId = await register(listenPort)
 connectSSE(bridgeId, mcp) // runs in background
+// session_id는 Rust 서버가 JSONL watcher에서 자동 매칭
 
 await mcp.connect(new StdioServerTransport())

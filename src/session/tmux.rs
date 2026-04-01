@@ -18,10 +18,16 @@ pub async fn create_session(cwd: &str) -> anyhow::Result<String> {
         );
     }
 
-    // Send "claude" command to start Claude Code inside the tmux session.
-    // The alias is expected to include any channel flags.
+    // Start Claude Code with expect to auto-confirm the channel prompt
+    let expect_cmd = r#"expect -c '
+set timeout 10
+spawn claude --dangerously-load-development-channels server:spire
+expect "Enter to confirm"
+send "\r"
+interact
+'"#;
     let _ = Command::new("tmux")
-        .args(["send-keys", "-t", &session_name, "claude", "Enter"])
+        .args(["send-keys", "-t", &session_name, expect_cmd, "Enter"])
         .output()
         .await?;
 

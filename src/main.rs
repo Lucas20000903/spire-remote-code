@@ -133,12 +133,24 @@ async fn main() {
     let registry_clone = state.registry.clone();
     tokio::spawn(async move {
         while let Ok(update) = jsonl_rx.recv().await {
-            // project_dir → cwd 역산 → 해당 cwd의 Bridge에 session_id 자동 설정
+            // 엔트리의 cwd 필드로 bridge 매칭 + session_id 자동 설정
+            let entry_cwd = update.entries.first().and_then(|e| e.cwd.clone());
+            let entry_ts = update.entries.last()
+                .and_then(|e| chrono::DateTime::parse_from_rfc3339(&e.timestamp).ok())
+                .map(|dt| dt.with_timezone(&chrono::Utc));
+
             if !update.session_id.is_empty() {
-                if let Some(cwd) = jsonl::parser::project_dir_to_cwd(&update.project_dir) {
-                    let bridges = registry_clone.list_active();
-                    for bridge in &bridges {
-                        if bridge.cwd == cwd && bridge.session_id.as_deref() != Some(&update.session_id) {
+                let existing = registry_clone.find_by_session(&update.session_id);
+                // 이미 이 session_id가 매칭된 bridge가 없는 경우에만 auto-match
+                if existing.is_none() {
+                    if let Some(ref cwd) = entry_cwd {
+                        let bridges = registry_clone.list_active();
+                        // session_id가 아직 None인 bridge 중 cwd 매칭 + 엔트리가 bridge 등록 이후인 것만
+                        if let Some(bridge) = bridges.iter().find(|b| {
+                            b.session_id.is_none()
+                                && (b.cwd == *cwd || cwd.starts_with(&b.cwd) || b.cwd.starts_with(cwd.as_str()))
+                                && entry_ts.map_or(true, |ts| ts >= b.registered_at)
+                        }) {
                             registry_clone.update_session(&bridge.id, update.session_id.clone());
                             tracing::info!("auto-matched session {} to bridge {} (cwd: {})", update.session_id, bridge.id, cwd);
                         }
@@ -146,16 +158,18 @@ async fn main() {
                 }
             }
 
+            // bridge_id 역조회: session_id로 찾기
+            let bridge_id = registry_clone.find_by_session(&update.session_id)
+                .map(|b| b.id.clone());
+
             let msg = serde_json::json!({
                 "type": "jsonl_update",
                 "session_id": update.session_id,
+                "bridge_id": bridge_id,
                 "messages": update.entries,
             });
             ws_hub_clone
-                .broadcast_to_session(
-                    &update.session_id,
-                    serde_json::to_string(&msg).unwrap(),
-                )
+                .broadcast_all(serde_json::to_string(&msg).unwrap())
                 .await;
         }
     });
@@ -231,6 +245,47 @@ async fn main() {
                 )
                 .await;
                 axum::Json(serde_json::json!({ "projects": projects }))
+            }),
+        )
+        .route(
+            "/api/debug/bridges",
+            get(|State(state): State<AppState>| async move {
+                let bridges: Vec<_> = state.registry.list_active().iter().map(|b| {
+                    serde_json::json!({
+                        "id": b.id,
+                        "cwd": b.cwd,
+                        "port": b.port,
+                        "pid": b.pid,
+                        "session_id": b.session_id,
+                    })
+                }).collect();
+                axum::Json(serde_json::json!({ "bridges": bridges }))
+            }),
+        )
+        .route(
+            "/api/favorites",
+            get(|State(state): State<AppState>| async move {
+                let conn = state.db.lock().unwrap();
+                let mut stmt = conn.prepare("SELECT cwd FROM favorite ORDER BY created_at").unwrap();
+                let favs: Vec<String> = stmt.query_map([], |row| row.get(0)).unwrap().filter_map(|r| r.ok()).collect();
+                axum::Json(serde_json::json!({ "favorites": favs }))
+            })
+            .post(|State(state): State<AppState>, axum::Json(body): axum::Json<serde_json::Value>| async move {
+                let cwd = body["cwd"].as_str().unwrap_or("");
+                if cwd.is_empty() {
+                    return (axum::http::StatusCode::BAD_REQUEST, axum::Json(serde_json::json!({ "error": "cwd required" })));
+                }
+                let conn = state.db.lock().unwrap();
+                conn.execute("INSERT OR IGNORE INTO favorite (cwd) VALUES (?1)", [cwd]).unwrap();
+                (axum::http::StatusCode::OK, axum::Json(serde_json::json!({ "ok": true })))
+            }),
+        )
+        .route(
+            "/api/favorites/{cwd}",
+            axum::routing::delete(|State(state): State<AppState>, axum::extract::Path(cwd): axum::extract::Path<String>| async move {
+                let conn = state.db.lock().unwrap();
+                conn.execute("DELETE FROM favorite WHERE cwd = ?1", [&cwd]).unwrap();
+                axum::Json(serde_json::json!({ "ok": true }))
             }),
         )
         .layer(axum_mw::from_fn_with_state(

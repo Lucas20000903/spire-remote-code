@@ -1,6 +1,6 @@
 {
   "mcpServers": {
-    "webapp-bridge": {
+    "spire": {
       "command": "bun",
       "args": ["./bridge/bridge.ts"]
     }

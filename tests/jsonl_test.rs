@@ -12,7 +12,8 @@ fn test_parse_text_message() {
 fn test_parse_assistant_with_blocks() {
     let line = r#"{"uuid":"u2","parentUuid":"u1","sessionId":"s1","timestamp":"2026-04-01T00:01:00Z","type":"assistant","message":{"role":"assistant","content":[{"type":"thinking","thinking":"reasoning..."},{"type":"text","text":"answer"},{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"ls"}}]}}"#;
     let entry = parse_entry(line).unwrap();
-    match &entry.message.content {
+    let message = entry.message.expect("should have message");
+    match &message.content {
         claude_code_remote::jsonl::parser::Content::Blocks(blocks) => {
             assert_eq!(blocks.len(), 3);
             assert!(matches!(blocks[0], ContentBlock::Thinking { .. }));
@@ -21,6 +22,23 @@ fn test_parse_assistant_with_blocks() {
         }
         _ => panic!("expected blocks"),
     }
+}
+
+#[test]
+fn test_parse_system_entry_no_message() {
+    let line = r#"{"uuid":"u3","type":"system","subtype":"compact","timestamp":"2026-04-01T00:00:00Z","isMeta":true}"#;
+    let entry = parse_entry(line).unwrap();
+    assert_eq!(entry.entry_type, "system");
+    assert!(entry.message.is_none());
+    assert!(!entry.is_conversation());
+}
+
+#[test]
+fn test_parse_file_history_snapshot() {
+    let line = r#"{"type":"file-history-snapshot","messageId":"abc","snapshot":{},"isSnapshotUpdate":false}"#;
+    let entry = parse_entry(line).unwrap();
+    assert_eq!(entry.entry_type, "file-history-snapshot");
+    assert!(!entry.is_conversation());
 }
 
 #[test]

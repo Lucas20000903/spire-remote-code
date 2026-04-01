@@ -14,6 +14,7 @@ pub struct AppState {
     pub ws_hub: WsHub,
     pub config: AppConfig,
     pub bridge_senders: Arc<RwLock<HashMap<String, tokio::sync::mpsc::Sender<String>>>>,
+    pub ws_client_count: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 impl AppState {
@@ -24,5 +25,11 @@ impl AppState {
         } else {
             self.registry.queue_message(bridge_id, msg);
         }
+    }
+
+    pub fn has_ws_clients(&self) -> bool {
+        self.ws_client_count
+            .load(std::sync::atomic::Ordering::Relaxed)
+            > 0
     }
 }
