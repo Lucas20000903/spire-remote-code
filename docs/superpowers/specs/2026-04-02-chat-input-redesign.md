@@ -69,13 +69,20 @@
 
 ## Backend Design (Rust)
 
+### File Storage Location
+
+`.temp/` 디렉토리는 서버 프로세스의 현재 작업 디렉토리(cwd) 기준 글로벌로 하나 생성한다. 세션/브릿지별로 분리하지 않는다. Claude Code가 로컬 파일 시스템에서 절대 경로로 접근하므로 위치만 일관되면 된다.
+
+서버 시작 시 `{server_cwd}/.temp/`를 자동 생성한다.
+
 ### POST /upload
 
+- `require_auth` 미들웨어 적용 (기존 보호된 라우트와 동일)
 - Content-Type: `multipart/form-data`
-- 파일을 `{working_dir}/.temp/{uuid}-{original_filename}`에 저장
+- 파일을 `{server_cwd}/.temp/{uuid}-{original_filename}`에 저장
 - Response: `{ "path": "/absolute/path/.temp/uuid-filename.ext", "name": "filename.ext" }`
-- 파일 크기 제한: 50MB
-- `.temp/` 디렉토리는 서버 시작 시 자동 생성
+- 파일 크기 제한: 50MB, 초과 시 HTTP 413 + `{ "error": "File too large" }` 반환
+- 의존성: `axum`의 `multipart` feature 또는 `axum-extra` 추가 필요
 
 ### Cleanup
 
@@ -84,7 +91,7 @@
 
 ## Bridge / MCP
 
-변경 없음. content에 파일 경로가 텍스트로 포함되므로 기존 `send_message` → `notifications/claude/channel` 흐름이 그대로 동작한다.
+변경 없음. `[file:/path]` 형식은 파싱 대상이 아닌 plain text다. Claude Code의 LLM이 경로를 인식하고 Read tool 등으로 파일에 접근한다. Bridge나 MCP 프로토콜 수정 불필요.
 
 ## Testing
 
