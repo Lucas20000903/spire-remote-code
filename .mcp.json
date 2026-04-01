@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "webapp-bridge": {
+      "command": "bun",
+      "args": ["./bridge/bridge.ts"]
+    }
+  }
+}
