@@ -7,6 +7,7 @@ import { ConnectionBanner } from '@/components/layout/connection-banner'
 import { SessionList } from '@/components/session/session-list'
 import { ChatView } from '@/components/chat/chat-view'
 import { Button } from '@/components/ui/button'
+import { PermissionDialog } from '@/components/permission/permission-dialog'
 
 function AuthenticatedApp({ logout }: { logout: () => void }) {
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null)
@@ -38,6 +39,7 @@ function AuthenticatedApp({ logout }: { logout: () => void }) {
           </>
         )}
       </div>
+      <PermissionDialog />
     </WsProvider>
   )
 }
