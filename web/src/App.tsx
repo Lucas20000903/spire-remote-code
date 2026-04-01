@@ -1,7 +1,34 @@
 import { useAuth } from '@/hooks/use-auth'
+import { WsProvider } from '@/hooks/use-websocket'
 import { SetupForm } from '@/components/auth/setup-form'
 import { LoginForm } from '@/components/auth/login-form'
+import { ConnectionBanner } from '@/components/layout/connection-banner'
+import { SessionList } from '@/components/session/session-list'
 import { Button } from '@/components/ui/button'
+
+function AuthenticatedApp({ logout }: { logout: () => void }) {
+  return (
+    <WsProvider>
+      <div className="flex min-h-screen flex-col">
+        <ConnectionBanner />
+        <header className="flex items-center justify-between border-b px-4 py-2">
+          <h1 className="text-lg font-semibold">Spire</h1>
+          <Button variant="ghost" size="sm" onClick={logout}>
+            Sign Out
+          </Button>
+        </header>
+        <main className="flex-1">
+          <SessionList
+            onSelectSession={(id) => {
+              // TODO: navigate to chat view (Task 11)
+              console.log('select session', id)
+            }}
+          />
+        </main>
+      </div>
+    </WsProvider>
+  )
+}
 
 function App() {
   const { state, onAuthenticated, logout } = useAuth()
@@ -30,15 +57,7 @@ function App() {
     )
   }
 
-  return (
-    <div className="flex min-h-screen flex-col items-center justify-center gap-4 p-4">
-      <h1 className="text-2xl font-bold">Authenticated!</h1>
-      <p className="text-muted-foreground">You are signed in.</p>
-      <Button variant="outline" onClick={logout}>
-        Sign Out
-      </Button>
-    </div>
-  )
+  return <AuthenticatedApp logout={logout} />
 }
 
 export default App
