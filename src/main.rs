@@ -78,6 +78,18 @@ async fn main() {
             post(bridge::routes::update_session),
         )
         .route("/api/bridges/stream", get(bridge::sse::bridge_stream))
+        .route(
+            "/api/projects",
+            get(|State(state): State<AppState>| async move {
+                let roots: Vec<String> = vec!["/Users/lucas/workspace".into()];
+                let projects = session::projects::list_projects(
+                    &state.config.claude_projects_dir,
+                    &roots,
+                )
+                .await;
+                axum::Json(serde_json::json!({ "projects": projects }))
+            }),
+        )
         .with_state(state);
 
     let addr = format!("0.0.0.0:{}", port);
