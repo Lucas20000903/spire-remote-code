@@ -7,10 +7,12 @@ mod jsonl;
 mod push;
 mod session;
 mod state;
+mod upload;
 mod ws;
 
 use axum::{
-    extract::{ws::WebSocketUpgrade, FromRef, State},
+    extract::{ws::WebSocketUpgrade, FromRef, Query, State},
+    middleware as axum_mw,
     response::IntoResponse,
     routing::{get, post},
     Router,
@@ -52,12 +54,31 @@ impl FromRef<AppState> for Arc<BridgeRegistry> {
     }
 }
 
+#[derive(serde::Deserialize)]
+struct WsQuery {
+    token: Option<String>,
+}
+
 async fn ws_handler(
     ws_upgrade: WebSocketUpgrade,
     State(state): State<AppState>,
-) -> impl IntoResponse {
+    Query(query): Query<WsQuery>,
+) -> Result<impl IntoResponse, error::AppError> {
+    // WebSocket은 Authorization 헤더 대신 query param으로 토큰 검증
+    let token = query.token.ok_or(error::AppError::Unauthorized)?;
+    let secret = {
+        let conn = state.db.lock().unwrap();
+        conn.query_row(
+            "SELECT value FROM config WHERE key = 'jwt_secret'",
+            [],
+            |r| r.get::<_, String>(0),
+        )
+        .map_err(|_| error::AppError::Unauthorized)?
+    };
+    auth::jwt::verify_token(&token, &secret).map_err(|_| error::AppError::Unauthorized)?;
+
     let state = Arc::new(state);
-    ws_upgrade.on_upgrade(move |socket| ws::handler::handle_ws(socket, state))
+    Ok(ws_upgrade.on_upgrade(move |socket| ws::handler::handle_ws(socket, state)))
 }
 
 #[tokio::main]
@@ -102,12 +123,27 @@ async fn main() {
         ws_hub,
         config,
         bridge_senders: Arc::new(RwLock::new(HashMap::new())),
+        ws_client_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
     };
 
-    // JSONL updates → WsHub: broadcast parsed entries to session subscribers
+    // JSONL updates → 자동 session_id 매칭 + WsHub 브로드캐스트
     let ws_hub_clone = state.ws_hub.clone();
+    let registry_clone = state.registry.clone();
     tokio::spawn(async move {
         while let Ok(update) = jsonl_rx.recv().await {
+            // project_dir → cwd 역산 → 해당 cwd의 Bridge에 session_id 자동 설정
+            if !update.session_id.is_empty() {
+                if let Some(cwd) = jsonl::parser::project_dir_to_cwd(&update.project_dir) {
+                    let bridges = registry_clone.list_active();
+                    for bridge in &bridges {
+                        if bridge.cwd == cwd && bridge.session_id.as_deref() != Some(&update.session_id) {
+                            registry_clone.update_session(&bridge.id, update.session_id.clone());
+                            tracing::info!("auto-matched session {} to bridge {} (cwd: {})", update.session_id, bridge.id, cwd);
+                        }
+                    }
+                }
+            }
+
             let msg = serde_json::json!({
                 "type": "jsonl_update",
                 "session_id": update.session_id,
@@ -174,21 +210,8 @@ async fn main() {
         .allow_methods(Any)
         .allow_headers(Any);
 
-    let mut app = Router::new()
-        .route("/health", get(|| async { "ok" }))
-        .route("/ws", get(ws_handler))
-        .route("/api/auth/status", get(auth::routes::check_status))
-        .route("/api/auth/setup", post(auth::routes::setup))
-        .route("/api/auth/login", post(auth::routes::login))
-        .route(
-            "/api/bridges/register",
-            post(bridge::routes::register),
-        )
-        .route(
-            "/api/bridges/update-session",
-            post(bridge::routes::update_session),
-        )
-        .route("/api/bridges/stream", get(bridge::sse::bridge_stream))
+    // 인증 필요한 라우트
+    let protected = Router::new()
         .route("/api/push/vapid-key", get(push::routes::get_vapid_key))
         .route("/api/push/subscribe", post(push::routes::subscribe))
         .route(
@@ -203,6 +226,29 @@ async fn main() {
                 axum::Json(serde_json::json!({ "projects": projects }))
             }),
         )
+        .layer(axum_mw::from_fn_with_state(
+            state.db.clone(),
+            auth::middleware::require_auth,
+        ));
+
+    // 공개 라우트 (인증 불필요)
+    let mut app = Router::new()
+        .route("/health", get(|| async { "ok" }))
+        .route("/ws", get(ws_handler)) // WS는 query param으로 자체 검증
+        .route("/api/auth/status", get(auth::routes::check_status))
+        .route("/api/auth/setup", post(auth::routes::setup))
+        .route("/api/auth/login", post(auth::routes::login))
+        // Bridge 내부 통신 (같은 Mac 내 localhost만 접근)
+        .route(
+            "/api/bridges/register",
+            post(bridge::routes::register),
+        )
+        .route(
+            "/api/bridges/update-session",
+            post(bridge::routes::update_session),
+        )
+        .route("/api/bridges/stream", get(bridge::sse::bridge_stream))
+        .merge(protected)
         .layer(cors)
         .with_state(state);
 

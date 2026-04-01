@@ -7,4 +7,5 @@ pub mod jsonl;
 pub mod push;
 pub mod session;
 pub mod state;
+pub mod upload;
 pub mod ws;
