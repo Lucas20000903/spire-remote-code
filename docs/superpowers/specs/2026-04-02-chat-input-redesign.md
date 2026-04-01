@@ -75,14 +75,14 @@
 
 서버 시작 시 `{server_cwd}/.temp/`를 자동 생성한다.
 
-### POST /upload
+### POST /api/upload
 
 - `require_auth` 미들웨어 적용 (기존 보호된 라우트와 동일)
 - Content-Type: `multipart/form-data`
 - 파일을 `{server_cwd}/.temp/{uuid}-{original_filename}`에 저장
 - Response: `{ "path": "/absolute/path/.temp/uuid-filename.ext", "name": "filename.ext" }`
-- 파일 크기 제한: 50MB, 초과 시 HTTP 413 + `{ "error": "File too large" }` 반환
-- 의존성: `axum`의 `multipart` feature 또는 `axum-extra` 추가 필요
+- 파일 크기 제한: 50MB, 초과 시 HTTP 413 + `{ "error": "Payload too large" }` 반환
+- 의존성: `axum`의 `multipart` feature 추가
 
 ### Cleanup
 
