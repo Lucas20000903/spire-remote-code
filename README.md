@@ -23,7 +23,6 @@
 - **Multi-session** — Manage multiple Claude Code sessions across different projects
 - **File upload** — Send images and files to Claude Code via the web UI
 - **PWA** — Install as a native app on iOS/Android (Home Screen)
-- **Sidebar** — Sessions grouped by workspace with favorites, status indicators
 - **Notifications** — Browser notifications when tasks complete
 - **Dark mode** — Follows system preference
 
@@ -107,56 +106,85 @@ alias claude='claude --dangerously-load-development-channels server:spire'
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────┐
-│ Mac                                                 │
-│                                                     │
-│  Rust Server (Axum) :3000                           │
-│  ┌────────┐ ┌──────────┐ ┌────────────────┐        │
-│  │ Auth   │ │ Session  │ │ JSONL Watcher  │        │
-│  │(SQLite)│ │ Registry │ │ (notify crate) │        │
-│  └────────┘ └──────────┘ └────────────────┘        │
-│  ┌────────┐ ┌──────────┐ ┌────────────────┐        │
-│  │  WS    │ │ Bridge   │ │ File Upload    │        │
-│  │  Hub   │ │ Router   │ │ (.temp/)       │        │
-│  └────────┘ └──────────┘ └────────────────┘        │
-│       ↕ HTTP/SSE                                    │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐            │
-│  │Bridge    │ │Bridge    │ │Bridge    │            │
-│  │:8800     │ │:8801     │ │:8802     │            │
-│  └────┬─────┘ └────┬─────┘ └────┬─────┘            │
-│       ↕ stdio       ↕ stdio      ↕ stdio            │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐            │
-│  │Claude    │ │Claude    │ │Claude    │            │
-│  │Code (0)  │ │Code (1)  │ │Code (2)  │            │
-│  └──────────┘ └──────────┘ └──────────┘            │
-└─────────────────────────────────────────────────────┘
-        ↕ WebSocket
-┌─────────────────┐
-│ Phone (PWA)     │
-│ React + Vite    │
-└─────────────────┘
+```mermaid
+graph TB
+  subgraph Mac
+    subgraph Rust["Rust Server :3000"]
+      Auth["Auth<br/>(SQLite)"]
+      Registry["Session<br/>Registry"]
+      Watcher["JSONL<br/>Watcher"]
+      WS["WebSocket<br/>Hub"]
+      Router["Bridge<br/>Router"]
+      Upload["File<br/>Upload"]
+    end
+
+    Bridge0["Bridge :8800"]
+    Bridge1["Bridge :8801"]
+    Bridge2["Bridge :8802"]
+
+    CC0["Claude Code (0)"]
+    CC1["Claude Code (1)"]
+    CC2["Claude Code (2)"]
+
+    Router -- "HTTP/SSE" --> Bridge0
+    Router -- "HTTP/SSE" --> Bridge1
+    Router -- "HTTP/SSE" --> Bridge2
+
+    Bridge0 -- "stdio" --> CC0
+    Bridge1 -- "stdio" --> CC1
+    Bridge2 -- "stdio" --> CC2
+
+    CC0 -. "writes jsonl" .-> Watcher
+    CC1 -. "writes jsonl" .-> Watcher
+    CC2 -. "writes jsonl" .-> Watcher
+  end
+
+  Phone["📱 Phone (PWA)<br/>React + Vite"]
+  Phone -- "WebSocket" --> WS
+  Watcher -- "jsonl_update" --> WS
 ```
 
 ### Data Flow
 
-```
-Phone → WebSocket → Rust → SSE → Bridge → MCP → Claude Code
-                                                      ↓
-Phone ← WebSocket ← Rust ← jsonl_update ← JSONL Watcher
-```
+```mermaid
+sequenceDiagram
+    participant P as Phone
+    participant R as Rust Server
+    participant B as Bridge
+    participant C as Claude Code
+    participant J as JSONL File
 
-History is synced in real-time by watching `~/.claude/projects/*.jsonl`.
+    P->>R: send_message (WebSocket)
+    R->>B: forward (SSE)
+    B->>C: MCP notification
+    C->>J: write response
+    J-->>R: file change detected
+    R-->>P: jsonl_update (WebSocket)
+```
 
 ## Tech Stack
 
-| Component | Technology |
-|-----------|-----------|
-| Backend | Rust (Axum, Tokio, rusqlite) |
-| Bridge | TypeScript (Bun), MCP SDK |
-| Frontend | React 19, Vite, Tailwind CSS 4, shadcn/ui, Framer Motion |
-| Database | SQLite |
-| Package Managers | pnpm (web), bun (bridge) |
+```mermaid
+graph LR
+    subgraph Backend
+        Rust["🦀 Rust<br/>Axum, Tokio"]
+        SQLite["🗄️ SQLite"]
+    end
+    subgraph Bridge
+        Bun["🥟 Bun<br/>TypeScript, MCP SDK"]
+    end
+    subgraph Frontend
+        React["⚛️ React 19"]
+        Vite["⚡ Vite"]
+        Tailwind["🎨 Tailwind CSS 4"]
+        Motion["🎬 Framer Motion"]
+    end
+
+    React --> Vite
+    React --> Tailwind
+    React --> Motion
+    Rust --> SQLite
+```
 
 ## Environment Variables
 
@@ -236,7 +264,6 @@ MIT
 - **멀티 세션** — 여러 프로젝트의 Claude Code 세션을 동시에 관리
 - **파일 업로드** — 이미지와 파일을 웹 UI에서 Claude Code로 전송
 - **PWA** — iOS/Android에서 네이티브 앱처럼 설치 (홈 화면에 추가)
-- **사이드바** — 워크스페이스별 세션 그룹핑, 즐겨찾기, 상태 표시
 - **알림** — 작업 완료 시 브라우저 알림
 - **다크 모드** — 시스템 설정 자동 감지
 
@@ -317,6 +344,59 @@ alias claude='claude --dangerously-load-development-channels server:spire'
 2. 최초 접속 시 계정 생성
 3. 로그인 후 활성 세션 목록 확인
 4. PWA로 설치 (브라우저 메뉴 → "홈 화면에 추가")
+
+### 아키텍처
+
+```mermaid
+graph TB
+  subgraph Mac
+    subgraph Rust["Rust 서버 :3000"]
+      Auth["인증<br/>(SQLite)"]
+      Registry["세션<br/>레지스트리"]
+      Watcher["JSONL<br/>워처"]
+      WS["WebSocket<br/>허브"]
+      Router["브릿지<br/>라우터"]
+      Upload["파일<br/>업로드"]
+    end
+
+    Bridge0["브릿지 :8800"]
+    Bridge1["브릿지 :8801"]
+
+    CC0["Claude Code (0)"]
+    CC1["Claude Code (1)"]
+
+    Router -- "HTTP/SSE" --> Bridge0
+    Router -- "HTTP/SSE" --> Bridge1
+
+    Bridge0 -- "stdio" --> CC0
+    Bridge1 -- "stdio" --> CC1
+
+    CC0 -. "jsonl 기록" .-> Watcher
+    CC1 -. "jsonl 기록" .-> Watcher
+  end
+
+  Phone["📱 폰 (PWA)<br/>React + Vite"]
+  Phone -- "WebSocket" --> WS
+  Watcher -- "jsonl_update" --> WS
+```
+
+### 데이터 흐름
+
+```mermaid
+sequenceDiagram
+    participant P as 폰
+    participant R as Rust 서버
+    participant B as 브릿지
+    participant C as Claude Code
+    participant J as JSONL 파일
+
+    P->>R: 메시지 전송 (WebSocket)
+    R->>B: 전달 (SSE)
+    B->>C: MCP 알림
+    C->>J: 응답 기록
+    J-->>R: 파일 변경 감지
+    R-->>P: jsonl_update (WebSocket)
+```
 
 ### 환경 변수
 
