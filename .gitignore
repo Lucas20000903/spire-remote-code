@@ -1,6 +1,11 @@
 target/
 bridge/node_modules/
 bridge/bun.lock
+bridge/package-lock.json
 web/node_modules/
 web/dist/
 .temp/
+.superpowers/
+.claude/skills/
+scripts/
+spire-permission-test-123.txt
