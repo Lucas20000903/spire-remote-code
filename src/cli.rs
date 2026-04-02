@@ -458,7 +458,7 @@ fn find_repo_root() -> Option<PathBuf> {
     None
 }
 
-/// `spire dev` — cargo-watch (port 3001) + Vite dev server (port 3000) 동시 실행
+/// `spire dev` — cargo-watch (프로덕션 포트) + Vite dev server (자동 포트) 동시 실행
 pub fn dev_server() {
     let repo = find_repo_root();
     let Some(repo) = repo else {
@@ -479,23 +479,40 @@ pub fn dev_server() {
         std::process::exit(1);
     }
 
-    println!("\n  Spire Dev Mode\n");
-    println!("  Frontend : http://localhost:3000  (Vite HMR)");
-    println!("  Backend  : http://localhost:3001  (cargo-watch)");
-    println!("  Open http://localhost:3000 on your phone\n");
+    let prefs = load_prefs();
+    let port = prefs.port;
 
-    // Rust server (cargo-watch, port 3001, debug 빌드, STATIC_DIR 없음)
+    // 프로덕션 서버가 실행 중이면 중지
+    let prod_was_running = is_service_running();
+    if prod_was_running {
+        println!("  Stopping production server...");
+        service_stop();
+        // 포트 해제 대기
+        std::thread::sleep(std::time::Duration::from_millis(500));
+    }
+
+    println!("\n  Spire Dev Mode\n");
+    println!("  Backend  : http://localhost:{}  (cargo-watch)", port);
+    println!("  Frontend : Vite HMR (auto port, see output below)");
+    println!("  Bridge connects to port {} as usual\n", port);
+
+    // Rust server (cargo-watch, 프로덕션과 같은 포트, STATIC_DIR 없음)
+    let run_arg = format!("run -- -p {}", port);
     let mut rust_proc = Command::new("cargo")
-        .args(["watch", "-x", "run -- -p 3001"])
+        .args(["watch", "-x", &run_arg])
         .current_dir(&repo)
         .env_remove("STATIC_DIR")
         .spawn()
         .expect("failed to start cargo-watch");
 
-    // Vite dev server (port 3000, proxy → 3001)
+    // Vite dev server (자동 포트 할당)
+    let proxy_target = format!("http://localhost:{}", port);
+    let ws_target = format!("ws://localhost:{}", port);
     let mut vite_proc = Command::new("pnpm")
         .args(["dev"])
         .current_dir(repo.join("web"))
+        .env("VITE_API_TARGET", &proxy_target)
+        .env("VITE_WS_TARGET", &ws_target)
         .spawn()
         .expect("failed to start Vite dev server");
 
@@ -514,6 +531,11 @@ pub fn dev_server() {
             kill_proc(vite_id);
             let _ = rust_proc.wait();
             let _ = vite_proc.wait();
+            // 프로덕션 서버 복구
+            if prod_was_running {
+                println!("  Restarting production server...");
+                service_start();
+            }
             println!("\n  Dev server stopped.");
             break;
         }
@@ -523,17 +545,32 @@ pub fn dev_server() {
             eprintln!("cargo-watch exited unexpectedly.");
             kill_proc(vite_id);
             let _ = vite_proc.wait();
+            if prod_was_running {
+                service_start();
+            }
             break;
         }
         if let Ok(Some(_)) = vite_proc.try_wait() {
             eprintln!("Vite dev server exited unexpectedly.");
             kill_proc(rust_id);
             let _ = rust_proc.wait();
+            if prod_was_running {
+                service_start();
+            }
             break;
         }
 
         std::thread::sleep(std::time::Duration::from_millis(200));
     }
+}
+
+fn is_service_running() -> bool {
+    let domain_label = format!("{}/{}", launchctl_uid(), PLIST_LABEL);
+    Command::new("launchctl")
+        .args(["print", &domain_label])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
 }
 
 fn ctrlc_channel(tx: std::sync::mpsc::Sender<()>) {

@@ -5,6 +5,9 @@ import tailwindcss from '@tailwindcss/vite'
 import { VitePWA } from 'vite-plugin-pwa'
 
 // https://vite.dev/config/
+const apiTarget = process.env.VITE_API_TARGET || 'http://localhost:3000'
+const wsTarget = process.env.VITE_WS_TARGET || 'ws://localhost:3000'
+
 export default defineConfig({
   plugins: [
     react(),
@@ -29,11 +32,10 @@ export default defineConfig({
     }),
   ],
   server: {
-    port: 3000,
     host: '0.0.0.0',
     proxy: {
-      '/api': 'http://localhost:3001',
-      '/ws': { target: 'ws://localhost:3001', ws: true },
+      '/api': apiTarget,
+      '/ws': { target: wsTarget, ws: true },
     },
   },
   resolve: {
