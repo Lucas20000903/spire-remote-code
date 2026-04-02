@@ -1,5 +1,6 @@
 <p align="center">
-  <img src="web/public/logo-light.svg" height="48" alt="Spire" />
+  <img src="./logo-light.svg#gh-light-mode-only" height="48" alt="Spire" />
+  <img src="./logo-dark.svg#gh-dark-mode-only" height="48" alt="Spire" />
 </p>
 
 <p align="center">
@@ -220,7 +221,8 @@ MIT
 ## 한국어
 
 <p align="center">
-  <img src="web/public/logo-dark.svg" height="48" alt="Spire" />
+  <img src="./logo-light.svg#gh-light-mode-only" height="48" alt="Spire" />
+  <img src="./logo-dark.svg#gh-dark-mode-only" height="48" alt="Spire" />
 </p>
 
 <p align="center">
