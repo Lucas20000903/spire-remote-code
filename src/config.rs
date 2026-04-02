@@ -38,6 +38,18 @@ impl AppConfig {
         }
         if let Ok(dir) = std::env::var("STATIC_DIR") {
             config.static_dir = Some(PathBuf::from(dir));
+        } else {
+            // Auto-detect: check ./web/dist relative to cwd or executable
+            let candidates = [
+                std::env::current_dir().ok().map(|p| p.join("web/dist")),
+                std::env::current_exe().ok().and_then(|p| p.parent().map(|p| p.join("web/dist"))),
+            ];
+            for candidate in candidates.into_iter().flatten() {
+                if candidate.join("index.html").exists() {
+                    config.static_dir = Some(candidate);
+                    break;
+                }
+            }
         }
         config
     }
