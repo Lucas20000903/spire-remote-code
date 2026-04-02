@@ -5,17 +5,21 @@
 
 @custom-variant dark (&:is(.dark *));
 
-/* Prevent overscroll and fix mobile viewport */
-html, body {
-  overscroll-behavior: none;
-  overflow: hidden;
+/* Fix mobile viewport */
+html {
+  height: 100vh;
   height: 100dvh;
-  height: 100vh; /* fallback */
+}
+body {
+  height: 100%;
+  margin: 0;
+  overflow-x: hidden;
+  overscroll-behavior-x: none;
 }
 #root {
-  height: 100dvh;
   height: 100vh;
-  overflow: hidden;
+  height: 100dvh;
+  overflow-x: hidden;
 }
 
 @theme inline {
@@ -138,9 +142,34 @@ html, body {
 code, kbd, samp, pre {
   font-family: var(--font-sans) !important;
 }
+.prose pre {
+  overflow-x: auto;
+  padding: 1rem !important;
+  scrollbar-width: none;
+}
+.prose pre::-webkit-scrollbar {
+  display: none;
+}
+.prose pre code {
+  display: block;
+  white-space: pre;
+}
 .prose :not(pre) > code {
   padding-block: 0 !important;
   font-size: inherit !important;
+}
+
+/* Mobile sidebar slide */
+.sidebar-open {
+  left: 300px;
+  border-top-left-radius: 16px;
+  border-bottom-left-radius: 16px;
+}
+
+/* Fade in up animation */
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 /* Session progress shimmer */

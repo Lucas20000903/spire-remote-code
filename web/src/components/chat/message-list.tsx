@@ -75,13 +75,24 @@ export function MessageList({
 
   const prevScrollHeightRef = useRef(0)
   const isLoadingMore = useRef(false)
+  const isProgrammaticScroll = useRef(false)
+  const userScrolledUp = useRef(false)
 
   const handleScroll = useCallback(() => {
     const el = containerRef.current
     if (!el) return
 
+    // 프로그래밍 스크롤 중에는 shouldAutoScroll을 변경하지 않음
+    if (isProgrammaticScroll.current) return
+
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
-    shouldAutoScroll.current = distanceFromBottom < 100
+    if (distanceFromBottom > 150) {
+      userScrolledUp.current = true
+      shouldAutoScroll.current = false
+    } else if (distanceFromBottom < 50) {
+      userScrolledUp.current = false
+      shouldAutoScroll.current = true
+    }
 
     if (el.scrollTop < 50 && hasMore && !loading && !isLoadingMore.current) {
       isLoadingMore.current = true
@@ -92,22 +103,32 @@ export function MessageList({
 
   const isInitialLoad = useRef(true)
 
+  const scrollToBottom = useCallback((smooth = true) => {
+    isProgrammaticScroll.current = true
+    if (smooth) {
+      bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+      setTimeout(() => { isProgrammaticScroll.current = false }, 500)
+    } else {
+      bottomRef.current?.scrollIntoView()
+      requestAnimationFrame(() => { isProgrammaticScroll.current = false })
+    }
+  }, [])
+
   useEffect(() => {
     if (messages.length === 0) return
     const el = containerRef.current
 
     if (isInitialLoad.current) {
       isInitialLoad.current = false
-      bottomRef.current?.scrollIntoView()
+      scrollToBottom(false)
     } else if (isLoadingMore.current && el) {
-      // 이전 메시지 로드 후 스크롤 위치 보존
       const newScrollHeight = el.scrollHeight
       el.scrollTop = newScrollHeight - prevScrollHeightRef.current
       isLoadingMore.current = false
-    } else if (shouldAutoScroll.current) {
-      bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+    } else if (shouldAutoScroll.current && !userScrolledUp.current) {
+      scrollToBottom(true)
     }
-  }, [messages])
+  }, [messages, scrollToBottom])
 
   // 필터 + 그룹화
   const filtered = useMemo(
@@ -206,7 +227,7 @@ export function MessageList({
       ref={containerRef}
       data-message-list
       onScroll={handleScroll}
-      className="flex-1 overflow-y-auto px-4 py-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      className="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain px-4 py-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
     >
       <div className="mx-auto max-w-4xl">
         {loading && (

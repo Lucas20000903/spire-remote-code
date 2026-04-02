@@ -12,6 +12,7 @@ interface SessionsContextValue {
   createSession: (cwd: string) => void
   findByBridgeId: (bridgeId: string) => SessionInfo | undefined
   completedCount: number
+  markSeen: (bridgeId: string) => void
 }
 
 const SessionsContext = createContext<SessionsContextValue | null>(null)
@@ -24,6 +25,8 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
   const [recent, setRecent] = useState<SessionInfo[]>([])
   const pendingRef = useRef<Set<string>>(new Set())
   const prevStatusRef = useRef<Map<string, SessionStatus>>(new Map())
+  const settingsRef = useRef(settings)
+  settingsRef.current = settings
 
   useEffect(() => {
     if (status !== 'connected') return
@@ -34,7 +37,13 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
       if (msg.type === 'sessions') {
         setActive((prev) => {
           const pendingSessions = prev.filter((s) => pendingRef.current.has(s.bridge_id))
-          return [...msg.active.map((s) => ({ ...s, status: (s.status || 'idle') as SessionStatus })), ...pendingSessions]
+          // 기존 status 보존
+          const prevMap = new Map(prev.map((s) => [s.bridge_id, s]))
+          const merged = msg.active.map((s) => {
+            const existing = prevMap.get(s.bridge_id)
+            return { ...s, status: (existing?.status || s.status || 'idle') as SessionStatus }
+          })
+          return [...merged, ...pendingSessions]
         })
         setRecent(msg.recent)
       } else if (msg.type === 'session_registered') {
@@ -80,21 +89,26 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
           }
         }
 
-        setActive((prev) => prev.map((s) => {
-          if (s.bridge_id !== bid) return s
-          const updates: Partial<SessionInfo> = {}
-          if (newStatus) updates.status = newStatus
-          if (lastUserText) updates.lastUserMessage = lastUserText.slice(0, 60)
-          return { ...s, ...updates }
-        }))
+        setActive((prev) => {
+          return prev.map((s) => {
+            if (s.bridge_id !== bid) return s
+            const updates: Partial<SessionInfo> = {}
+            if (newStatus) updates.status = newStatus
+            if (lastUserText) updates.lastUserMessage = lastUserText.slice(0, 60)
+            return { ...s, ...updates }
+          })
+        })
 
         // 완료 전환 감지 → 알림
-        if (newStatus === 'completed' && settings.notificationsEnabled) {
+        if (newStatus === 'completed' && settingsRef.current.notificationsEnabled) {
           const prevStatus = prevStatusRef.current.get(bid)
           if (prevStatus && prevStatus !== 'completed') {
-            const session = active.find((s) => s.bridge_id === bid)
-            const project = session?.cwd.split('/').pop() || 'Session'
-            showNotification(`${project} - Task completed`, lastUserText || undefined)
+            setActive((prev) => {
+              const session = prev.find((s) => s.bridge_id === bid)
+              const project = session?.cwd.split('/').pop() || 'Session'
+              showNotification(`${project} - Task completed`, lastUserText || undefined)
+              return prev
+            })
           }
         }
 
@@ -104,7 +118,7 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
         }
       }
     })
-  }, [status, send, onMessage, navigate, settings.notificationsEnabled, active])
+  }, [status, send, onMessage, navigate])
 
   const createSession = useCallback(
     (cwd: string) => {
@@ -129,10 +143,19 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
     [active],
   )
 
+  // completed 세션을 idle로 전환 (세션 진입 시 호출)
+  const markSeen = useCallback((bridgeId: string) => {
+    setActive((prev) => prev.map((s) =>
+      s.bridge_id === bridgeId && s.status === 'completed'
+        ? { ...s, status: 'idle' as SessionStatus }
+        : s
+    ))
+  }, [])
+
   const completedCount = active.filter((s) => s.status === 'completed').length
 
   return (
-    <SessionsContext.Provider value={{ active, recent, createSession, findByBridgeId, completedCount }}>
+    <SessionsContext.Provider value={{ active, recent, createSession, findByBridgeId, completedCount, markSeen }}>
       {children}
     </SessionsContext.Provider>
   )

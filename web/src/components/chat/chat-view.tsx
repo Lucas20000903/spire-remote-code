@@ -13,7 +13,7 @@ const PAGE_SIZE = 50
 export function ChatView() {
   const { bridgeId } = useParams<{ bridgeId: string }>()
   const { send, onMessage, status } = useWebSocket()
-  const { findByBridgeId } = useSessions()
+  const { findByBridgeId, markSeen } = useSessions()
   const { setTitle } = useLayout()
   const session = findByBridgeId(bridgeId || '')
 
@@ -39,13 +39,14 @@ export function ChatView() {
     }
   }, [sessionId, send])
 
-  // bridgeId 바뀌면 messages 초기화
+  // bridgeId 바뀌면 messages 초기화 + completed 세션 확인 처리
   useEffect(() => {
     setMessages([])
     setHasMore(true)
     setLoading(false)
     initialLoadDone.current = false
-  }, [bridgeId])
+    if (bridgeId) markSeen(bridgeId)
+  }, [bridgeId, markSeen])
 
   // session.id가 설정되면 history 로드 (auto-match 완료 후)
   const actualSessionId = session?.id
@@ -149,13 +150,13 @@ export function ChatView() {
     const list = inputRef.current.parentElement?.querySelector<HTMLElement>('[data-message-list]')
     if (!list) return
     const ro = new ResizeObserver(([entry]) => {
-      const dist = list.scrollHeight - list.scrollTop - list.clientHeight
-      const wasNearBottom = dist < 500
-      list.style.paddingBottom = `${entry.contentRect.height + 8}px`
-      if (wasNearBottom) {
-        requestAnimationFrame(() => {
-          list.scrollTop = list.scrollHeight
-        })
+      const prevPadding = parseFloat(list.style.paddingBottom) || 0
+      const newPadding = entry.contentRect.height + 8
+      const diff = newPadding - prevPadding
+      list.style.paddingBottom = `${newPadding}px`
+      // paddingBottom이 커지면 스크롤 위치를 보정 (현재 위치 유지)
+      if (diff > 0) {
+        list.scrollTop += diff
       }
     })
     ro.observe(inputRef.current)

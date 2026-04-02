@@ -1,6 +1,5 @@
-import { useEffect, useState, useRef, useCallback } from 'react'
+import { useEffect, useState, useRef, useCallback, useMemo } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { motion } from 'motion/react'
 import { useSessions } from '@/hooks/use-sessions'
 import { useWebSocket } from '@/hooks/use-websocket'
 import { fetchFavorites } from '@/lib/api'
@@ -33,11 +32,7 @@ function StatusIndicator({ status }: { status?: SessionStatus }) {
         </span>
       )
     case 'in-progress':
-      return (
-        <span className="relative h-1.5 w-6 shrink-0 overflow-hidden rounded-full bg-muted">
-          <span className="absolute inset-0 animate-[progress-shimmer_1.5s_ease-in-out_infinite] rounded-full bg-foreground/30" />
-        </span>
-      )
+      return <Loader2 className="h-3 w-3 shrink-0 animate-spin text-green-500" />
     case 'pending':
       return <span className="inline-flex h-2 w-2 shrink-0 rounded-full bg-muted-foreground/30" />
     default: // idle
@@ -55,18 +50,19 @@ export function SidebarContent({ onSelect }: SidebarContentProps) {
   const logout = () => { localStorage.removeItem('token'); window.location.reload() }
   const navigate = useNavigate()
   const { bridgeId } = useParams<{ bridgeId: string }>()
-  const grouped = groupByCwd(active)
+  const grouped = useMemo(() => groupByCwd(active), [active])
   const [favorites, setFavorites] = useState<string[]>([])
   const [scrollShadow, setScrollShadow] = useState({ top: false, bottom: false })
   const scrollRef = useRef<HTMLDivElement>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
 
+  // 페이지 focus 시 favorites refetch (폴링 대신)
   useEffect(() => {
-    fetchFavorites().then(setFavorites).catch(() => {})
-    const interval = setInterval(() => {
-      fetchFavorites().then(setFavorites).catch(() => {})
-    }, 5000)
-    return () => clearInterval(interval)
+    const load = () => fetchFavorites().then(setFavorites).catch(() => {})
+    load()
+    const onFocus = () => load()
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
   }, [])
 
   const updateScrollShadow = useCallback(() => {
@@ -96,8 +92,10 @@ export function SidebarContent({ onSelect }: SidebarContentProps) {
     onSelect?.()
   }
 
-  const favSet = new Set(favorites)
-  const nonFavGroups = Array.from(grouped.entries()).filter(([cwd]) => !favSet.has(cwd))
+  const nonFavGroups = useMemo(() => {
+    const favSet = new Set(favorites)
+    return Array.from(grouped.entries()).filter(([cwd]) => !favSet.has(cwd))
+  }, [favorites, grouped])
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
@@ -130,13 +128,10 @@ export function SidebarContent({ onSelect }: SidebarContentProps) {
         {[
           ...favorites.map((cwd) => ({ cwd, sessions: grouped.get(cwd) || [], isFav: true })),
           ...nonFavGroups.map(([cwd, sessions]) => ({ cwd, sessions, isFav: false })),
-        ].map((group, i) => (
-          <motion.div
+        ].map((group) => (
+          <div
             key={group.cwd}
             className="mb-1"
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.3, delay: i * 0.05, ease: [0.25, 0.1, 0.25, 1] }}
           >
             <div className="flex items-center justify-between px-2 pt-3 pb-1">
               <div className="flex items-center gap-1">
@@ -175,7 +170,7 @@ export function SidebarContent({ onSelect }: SidebarContentProps) {
                 </button>
               )
             })}
-          </motion.div>
+          </div>
         ))}
 
         {scrollShadow.bottom && (

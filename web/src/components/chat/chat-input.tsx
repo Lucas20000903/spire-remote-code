@@ -141,7 +141,7 @@ export function ChatInput({ disabled, onSend }: ChatInputProps) {
   }
 
   return (
-    <div className={`p-4 transition-[padding] duration-200 ${active ? '' : 'px-6'}`}>
+    <div className={`p-4 transition-[padding] duration-200 ${active ? '' : 'px-6'}`} style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}>
       <div className="mx-auto max-w-4xl">
         <div
           className={`flex flex-col gap-2 rounded-3xl bg-background/80 backdrop-blur-xl border border-muted px-4 py-3 transition-colors duration-200`}
