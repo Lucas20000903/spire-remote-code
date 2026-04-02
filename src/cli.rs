@@ -133,7 +133,7 @@ pub fn launch_cc() {
 
 /// `spire setup` — Interactive setup
 pub fn run_setup() {
-    println!("\n  ⛰️  Spire Setup\n");
+    println!("\n  Spire Setup\n");
 
     // 1. Bridge path
     let exe_dir = std::env::current_exe()

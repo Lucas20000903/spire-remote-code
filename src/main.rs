@@ -347,7 +347,7 @@ async fn main() {
     }
 
     let addr = format!("0.0.0.0:{}", port);
-    println!("\n  ⛰️  Spire v{}", env!("CARGO_PKG_VERSION"));
+    println!("\n  Spire v{}", env!("CARGO_PKG_VERSION"));
     println!("  Server: http://{}\n", addr);
     let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();
