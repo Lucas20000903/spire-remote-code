@@ -26,6 +26,7 @@
 - **Notifications** — Browser notifications when tasks complete
 - **Dark mode** — Follows system preference
 - **Dev Preview** — Draggable webview panel to preview dev servers (1600×900 scaled)
+- **Permission control** — Approve or deny Claude Code tool calls from your phone
 
 ## How it works
 
@@ -278,6 +279,7 @@ MIT
 - **알림** — 작업 완료 시 브라우저 알림
 - **다크 모드** — 시스템 설정 자동 감지
 - **Dev Preview** — 드래그 가능한 웹뷰 패널로 개발 서버 미리보기 (1600×900 스케일링)
+- **Permission 제어** — 폰에서 Claude Code 도구 호출 승인/거부
 
 ### 작동 원리
 

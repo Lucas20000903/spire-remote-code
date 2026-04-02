@@ -128,10 +128,18 @@ export function MessageList({
   }, [messages, scrollToBottom])
 
   // 필터 + 그룹화
-  const filtered = useMemo(
-    () => messages.filter((e) => !isToolResultOnlyEntry(e)),
-    [messages],
-  )
+  const filtered = useMemo(() => {
+    // tool_result 전용 엔트리의 uuid 수집 (자식 메시지 필터링용)
+    const toolResultUuids = new Set(
+      messages.filter((e) => isToolResultOnlyEntry(e)).map((e) => e.uuid),
+    )
+    return messages.filter((e) => {
+      if (isToolResultOnlyEntry(e)) return false
+      // tool_result의 자식 user 메시지 숨기기 (예: Skill 결과 텍스트)
+      if (e.type === 'user' && e.parentUuid && toolResultUuids.has(e.parentUuid)) return false
+      return true
+    })
+  }, [messages])
 
   const rendered = useMemo(() => {
     const nodes: ReactNode[] = []

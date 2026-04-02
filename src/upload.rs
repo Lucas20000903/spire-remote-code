@@ -8,9 +8,9 @@ use crate::error::AppError;
 const MAX_FILE_SIZE: usize = 50 * 1024 * 1024; // 50MB
 
 fn temp_dir() -> PathBuf {
-    std::env::current_dir()
-        .unwrap_or_else(|_| PathBuf::from("."))
-        .join(".temp")
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".spire/temp")
 }
 
 /// Sanitize filename: strip path components, replace problematic chars

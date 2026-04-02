@@ -35,6 +35,10 @@ export interface SessionInfo {
 
 /** jsonl_update 메시지 배열에서 세션 상태 추론 */
 export function deriveSessionStatus(messages: TranscriptEntry[]): SessionStatus | null {
+  // tool_result UUID 수집 (자식 메시지 건너뛰기용)
+  const toolResultUuids = new Set(
+    messages.filter((e) => isToolResultOnlyEntry(e)).map((e) => e.uuid),
+  )
   // 뒤에서부터 실제 대화 메시지 찾기
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i]
@@ -48,6 +52,8 @@ export function deriveSessionStatus(messages: TranscriptEntry[]): SessionStatus 
     if (m.type === 'user') {
       // tool_result만 있는 메시지는 건너뛰기
       if (Array.isArray(c) && c.every((b) => b.type === 'tool_result')) continue
+      // tool_result의 자식 메시지 건너뛰기 (예: Skill 결과 텍스트)
+      if (m.parentUuid && toolResultUuids.has(m.parentUuid)) continue
       return 'in-progress'
     }
   }

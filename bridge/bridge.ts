@@ -6,7 +6,20 @@ import { z } from 'zod'
 import { createServer } from 'net'
 
 // --- Config ---
-const RUST_SERVER = process.env.BRIDGE_RUST_SERVER || 'http://localhost:3000'
+import { readFileSync } from 'fs'
+import { join } from 'path'
+import { homedir } from 'os'
+
+function readPortFromPrefs(): number {
+  try {
+    const content = readFileSync(join(homedir(), '.spire/preferences.toml'), 'utf-8')
+    const match = content.match(/^port\s*=\s*(\d+)/m)
+    if (match) return parseInt(match[1])
+  } catch {}
+  return 3000
+}
+
+const RUST_SERVER = process.env.BRIDGE_RUST_SERVER || `http://localhost:${readPortFromPrefs()}`
 const PORT_MIN = parseInt(process.env.BRIDGE_PORT_MIN || '8800')
 const PORT_MAX = parseInt(process.env.BRIDGE_PORT_MAX || '8899')
 
@@ -55,12 +68,14 @@ async function updateSession(sessionId: string) {
 }
 
 // --- SSE connection to Rust server ---
-async function connectSSE(id: string, mcp: Server) {
-  const url = `${RUST_SERVER}/api/bridges/stream?bridge_id=${id}`
+async function connectSSE(port: number, mcp: Server) {
   let retryDelay = 1000
 
   while (true) {
     try {
+      // 서버 재시작 시 registry가 초기화되므로 매번 재등록
+      bridgeId = await register(port)
+      const url = `${RUST_SERVER}/api/bridges/stream?bridge_id=${bridgeId}`
       const res = await fetch(url)
       if (!res.ok || !res.body) throw new Error(`SSE failed: ${res.status}`)
       retryDelay = 1000
@@ -162,6 +177,6 @@ mcp.setNotificationHandler(PermissionRequestSchema, async ({ params }) => {
 // --- Start ---
 const listenPort = await findFreePort()
 bridgeId = await register(listenPort)
-connectSSE(bridgeId, mcp)
+connectSSE(listenPort, mcp)
 
 await mcp.connect(new StdioServerTransport())

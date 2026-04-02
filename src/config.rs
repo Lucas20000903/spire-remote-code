@@ -27,8 +27,12 @@ impl Default for AppConfig {
 impl AppConfig {
     pub fn from_env() -> Self {
         let mut config = Self::default();
+        // preferences.toml → 환경변수 순으로 덮어쓰기 (CLI -p 플래그는 main.rs에서 처리)
+        if let Some(prefs_port) = Self::read_prefs_port() {
+            config.port = prefs_port;
+        }
         if let Ok(p) = std::env::var("PORT") {
-            config.port = p.parse().unwrap_or(3000);
+            config.port = p.parse().unwrap_or(config.port);
         }
         if let Ok(range) = std::env::var("BRIDGE_PORT_RANGE") {
             if let Some((min, max)) = range.split_once('-') {
@@ -52,5 +56,16 @@ impl AppConfig {
             }
         }
         config
+    }
+
+    fn read_prefs_port() -> Option<u16> {
+        let path = dirs::home_dir()?.join(".spire/preferences.toml");
+        let content = std::fs::read_to_string(path).ok()?;
+        for line in content.lines() {
+            if line.trim().starts_with("port") {
+                return line.split('=').nth(1)?.trim().parse().ok();
+            }
+        }
+        None
     }
 }
