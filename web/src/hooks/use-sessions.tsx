@@ -49,7 +49,8 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
           const prevMap = new Map(prev.map((s) => [s.bridge_id, s]))
           const merged = msg.active.map((s) => {
             const existing = prevMap.get(s.bridge_id)
-            return { ...s, status: (existing?.status || s.status || 'idle') as SessionStatus }
+            // 서버 status > 기존 프론트 status > idle
+            return { ...s, status: (s.status || existing?.status || 'idle') as SessionStatus }
           })
           return [...merged, ...pendingSessions]
         })

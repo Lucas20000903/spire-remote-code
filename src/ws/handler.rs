@@ -121,10 +121,12 @@ async fn handle_list_sessions(
     let bridges = state.registry.list_active();
     let mut active = Vec::new();
     for b in &bridges {
-        let last_msg = if let Some(ref sid) = b.session_id {
-            get_last_user_message(&state.config.claude_projects_dir, sid).await
+        let (last_msg, status) = if let Some(ref sid) = b.session_id {
+            let msg = get_last_user_message(&state.config.claude_projects_dir, sid).await;
+            let st = get_session_status(&state.config.claude_projects_dir, sid).await;
+            (msg, st)
         } else {
-            None
+            (None, None)
         };
         active.push(serde_json::json!({
             "id": b.session_id,
@@ -132,6 +134,7 @@ async fn handle_list_sessions(
             "port": b.port,
             "bridge_id": b.id,
             "lastUserMessage": last_msg,
+            "status": status,
         }));
     }
     let msg = serde_json::json!({
@@ -175,6 +178,53 @@ async fn get_last_user_message(projects_dir: &std::path::Path, session_id: &str)
                     }
                 }
                 return None;
+            }
+        }
+    }
+    None
+}
+
+/// Read the last relevant message from a session's jsonl to determine status
+async fn get_session_status(projects_dir: &std::path::Path, session_id: &str) -> Option<String> {
+    let mut read_dir = tokio::fs::read_dir(projects_dir).await.ok()?;
+    while let Some(entry) = read_dir.next_entry().await.ok()? {
+        if entry.file_type().await.ok()?.is_dir() {
+            let candidate = entry.path().join(format!("{}.jsonl", session_id));
+            if candidate.exists() {
+                let content = tokio::fs::read_to_string(&candidate).await.ok()?;
+                // 뒤에서부터 마지막 관련 메시지 찾기
+                for line in content.lines().rev() {
+                    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(line.trim()) {
+                        let entry_type = parsed["type"].as_str().unwrap_or("");
+                        let content_val = &parsed["message"]["content"];
+
+                        // 시스템 메시지 건너뛰기
+                        if let Some(c) = content_val.as_str() {
+                            if c.starts_with('<') || c.starts_with("Caveat:") || c.starts_with("This session") {
+                                continue;
+                            }
+                        }
+
+                        if entry_type == "assistant" {
+                            let stop_reason = parsed["message"]["stop_reason"].as_str();
+                            return match stop_reason {
+                                Some("end_turn") => Some("completed".to_string()),
+                                Some("tool_use") | None => Some("in-progress".to_string()),
+                                _ => Some("idle".to_string()),
+                            };
+                        }
+                        if entry_type == "user" {
+                            // tool_result만 있는 메시지 건너뛰기
+                            if let Some(arr) = content_val.as_array() {
+                                if arr.iter().all(|b| b["type"].as_str() == Some("tool_result")) {
+                                    continue;
+                                }
+                            }
+                            return Some("in-progress".to_string());
+                        }
+                    }
+                }
+                return Some("idle".to_string());
             }
         }
     }
