@@ -74,6 +74,9 @@ pub async fn handle_ws(ws: WebSocket, state: Arc<AppState>) {
                     Some("create_session") => {
                         handle_create_session(&state, &parsed, &session_tx).await;
                     }
+                    Some("permission_response") => {
+                        handle_permission_response(&state, &parsed).await;
+                    }
                     _ => {}
                 }
             }
@@ -143,6 +146,19 @@ async fn handle_list_sessions(
         "recent": [],
     });
     let _ = tx.send(serde_json::to_string(&msg).unwrap()).await;
+
+    // pending permissions 전달 (앱을 늦게 열어도 받을 수 있도록)
+    for perm in state.registry.list_permissions() {
+        let perm_msg = serde_json::json!({
+            "type": "permission_request",
+            "bridge_id": perm.bridge_id,
+            "request_id": perm.request_id,
+            "tool_name": perm.tool_name,
+            "description": perm.description,
+            "input_preview": perm.input_preview,
+        });
+        let _ = tx.send(serde_json::to_string(&perm_msg).unwrap()).await;
+    }
 }
 
 async fn get_last_user_message(projects_dir: &std::path::Path, session_id: &str) -> Option<String> {
@@ -295,4 +311,31 @@ async fn handle_create_session(
             }
         }
     }
+}
+
+async fn handle_permission_response(state: &AppState, msg: &serde_json::Value) {
+    let bridge_id = match msg["bridge_id"].as_str() {
+        Some(id) => id,
+        None => return,
+    };
+    let request_id = match msg["request_id"].as_str() {
+        Some(id) => id,
+        None => return,
+    };
+    let behavior = match msg["behavior"].as_str() {
+        Some(b) if b == "allow" || b == "deny" => b,
+        _ => return,
+    };
+
+    // pending에서 제거
+    state.registry.remove_permission(request_id);
+
+    let event = serde_json::json!({
+        "_event": "permission_response",
+        "request_id": request_id,
+        "behavior": behavior,
+    });
+    state
+        .bridge_send(bridge_id, serde_json::to_string(&event).unwrap())
+        .await;
 }

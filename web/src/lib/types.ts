@@ -6,6 +6,7 @@ export type WsClientMessage =
   | { type: 'create_session'; cwd: string }
   | { type: 'subscribe'; session_id: string }
   | { type: 'unsubscribe'; session_id: string }
+  | { type: 'permission_response'; bridge_id: string; request_id: string; behavior: 'allow' | 'deny' }
 
 export type WsServerMessage =
   | { type: 'sessions'; active: SessionInfo[]; recent: SessionInfo[] }
@@ -19,6 +20,7 @@ export type WsServerMessage =
   | { type: 'session_create_failed'; error: string }
   | { type: 'history'; session_id: string; messages: TranscriptEntry[] }
   | { type: 'error'; message: string }
+  | { type: 'permission_request'; bridge_id: string; request_id: string; tool_name: string; description: string; input_preview: string }
 
 export type SessionStatus = 'idle' | 'in-progress' | 'completed' | 'pending'
 

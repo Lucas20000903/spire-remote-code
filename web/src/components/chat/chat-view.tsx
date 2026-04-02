@@ -7,6 +7,14 @@ import type { TranscriptEntry } from '@/lib/types'
 import { isConversationEntry, isSystemMessage } from '@/lib/types'
 import { MessageList } from './message-list'
 import { ChatInput } from './chat-input'
+import { PermissionCard } from './permission-card'
+
+interface PendingPermission {
+  requestId: string
+  toolName: string
+  description: string
+  inputPreview: string
+}
 
 const PAGE_SIZE = 50
 
@@ -21,6 +29,7 @@ export function ChatView() {
   const [loading, setLoading] = useState(false)
   const [hasMore, setHasMore] = useState(true)
   const initialLoadDone = useRef(false)
+  const [permissions, setPermissions] = useState<PendingPermission[]>([])
 
 
   const sessionId = session?.id || session?.cwd || ''
@@ -45,6 +54,7 @@ export function ChatView() {
     setHasMore(true)
     setLoading(false)
     initialLoadDone.current = false
+    setPermissions([])
     if (bridgeId) markSeen(bridgeId)
   }, [bridgeId, markSeen])
 
@@ -87,6 +97,18 @@ export function ChatView() {
         })
       }
 
+      if (msg.type === 'permission_request' && msg.bridge_id === bridgeIdRef.current) {
+        setPermissions((prev) => [
+          ...prev.filter((p) => p.requestId !== msg.request_id),
+          {
+            requestId: msg.request_id,
+            toolName: msg.tool_name,
+            description: msg.description,
+            inputPreview: msg.input_preview,
+          },
+        ])
+      }
+
       if (msg.type === 'jsonl_update' && (msg.bridge_id === bridgeIdRef.current || msgSid === currentSession?.id)) {
         setMessages((prev) => {
           // Remove optimistic entries that match incoming real entries
@@ -118,6 +140,14 @@ export function ChatView() {
       before: oldest.uuid,
     })
   }, [loading, hasMore, messages, send, sessionId])
+
+  const handlePermission = useCallback(
+    (requestId: string, behavior: 'allow' | 'deny') => {
+      if (!session) return
+      send({ type: 'permission_response', bridge_id: session.bridge_id, request_id: requestId, behavior } as any)
+    },
+    [send, session]
+  )
 
   const handleSend = useCallback(
     (content: string) => {
@@ -243,7 +273,17 @@ export function ChatView() {
           return false
         })()}
       />
-      <div ref={inputRef} className="absolute bottom-0 left-0 right-0">
+      <div ref={inputRef} className="absolute bottom-0 left-0 right-0 z-10">
+        {permissions.map((p) => (
+          <PermissionCard
+            key={p.requestId}
+            requestId={p.requestId}
+            toolName={p.toolName}
+            description={p.description}
+            inputPreview={p.inputPreview}
+            onRespond={handlePermission}
+          />
+        ))}
         <ChatInput
           disabled={status !== 'connected'}
           onSend={handleSend}

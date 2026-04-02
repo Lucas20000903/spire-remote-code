@@ -2,6 +2,15 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use tokio::sync::broadcast;
 
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct PendingPermission {
+    pub bridge_id: String,
+    pub request_id: String,
+    pub tool_name: String,
+    pub description: String,
+    pub input_preview: String,
+}
+
 #[derive(Clone, Debug)]
 pub struct BridgeInfo {
     pub id: String,
@@ -23,6 +32,7 @@ pub struct BridgeRegistry {
     bridges: RwLock<HashMap<String, BridgeInfo>>,
     event_tx: broadcast::Sender<BridgeEvent>,
     message_queues: RwLock<HashMap<String, Vec<String>>>,
+    pending_permissions: RwLock<Vec<PendingPermission>>,
 }
 
 impl BridgeRegistry {
@@ -32,6 +42,7 @@ impl BridgeRegistry {
             bridges: RwLock::new(HashMap::new()),
             event_tx: tx,
             message_queues: RwLock::new(HashMap::new()),
+            pending_permissions: RwLock::new(Vec::new()),
         })
     }
 
@@ -85,6 +96,10 @@ impl BridgeRegistry {
     pub fn unregister(&self, id: &str) {
         self.bridges.write().unwrap().remove(id);
         self.message_queues.write().unwrap().remove(id);
+        self.pending_permissions
+            .write()
+            .unwrap()
+            .retain(|p| p.bridge_id != id);
         let _ = self
             .event_tx
             .send(BridgeEvent::Unregistered(id.to_string()));
@@ -109,6 +124,15 @@ impl BridgeRegistry {
 
     pub fn get(&self, id: &str) -> Option<BridgeInfo> {
         self.bridges.read().unwrap().get(id).cloned()
+    }
+
+    pub fn find_by_port(&self, port: u16) -> Option<BridgeInfo> {
+        self.bridges
+            .read()
+            .unwrap()
+            .values()
+            .find(|b| b.port == port)
+            .cloned()
     }
 
     pub fn find_by_session(&self, session_id: &str) -> Option<BridgeInfo> {
@@ -143,5 +167,23 @@ impl BridgeRegistry {
             .get_mut(bridge_id)
             .map(|q| std::mem::take(q))
             .unwrap_or_default()
+    }
+
+    pub fn add_permission(&self, perm: PendingPermission) {
+        let mut perms = self.pending_permissions.write().unwrap();
+        // 같은 request_id가 이미 있으면 교체
+        perms.retain(|p| p.request_id != perm.request_id);
+        perms.push(perm);
+    }
+
+    pub fn remove_permission(&self, request_id: &str) {
+        self.pending_permissions
+            .write()
+            .unwrap()
+            .retain(|p| p.request_id != request_id);
+    }
+
+    pub fn list_permissions(&self) -> Vec<PendingPermission> {
+        self.pending_permissions.read().unwrap().clone()
     }
 }

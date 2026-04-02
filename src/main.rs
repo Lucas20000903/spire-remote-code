@@ -63,6 +63,7 @@ impl FromRef<AppState> for Arc<BridgeRegistry> {
     }
 }
 
+
 #[derive(serde::Deserialize)]
 struct WsQuery {
     token: Option<String>,
@@ -334,6 +335,10 @@ async fn main() {
             post(bridge::routes::update_session),
         )
         .route("/api/bridges/stream", get(bridge::sse::bridge_stream))
+        .route(
+            "/api/bridges/permission_request",
+            post(bridge::routes::permission_request),
+        )
         .merge(protected)
         .layer(cors)
         .with_state(state);
