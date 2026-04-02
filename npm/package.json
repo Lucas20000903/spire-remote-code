@@ -1,0 +1,20 @@
+{
+  "name": "spire-remote-code",
+  "version": "0.0.0",
+  "description": "Remote web UI for Claude Code — control sessions from your phone",
+  "bin": {
+    "spire": "bin/spire"
+  },
+  "scripts": {
+    "postinstall": "node postinstall.js"
+  },
+  "keywords": ["claude", "claude-code", "remote", "pwa", "mcp"],
+  "author": "Lucas",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Lucas20000903/spire-remote-code"
+  },
+  "os": ["darwin", "linux"],
+  "cpu": ["x64", "arm64"]
+}

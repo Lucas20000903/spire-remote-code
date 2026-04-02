@@ -26,6 +26,24 @@
 - **Notifications** — Browser notifications when tasks complete
 - **Dark mode** — Follows system preference
 
+## Installation
+
+### Option 1: npm / pnpm
+
+```bash
+npm install -g spire-remote-code
+# or
+pnpm add -g spire-remote-code
+```
+
+### Option 2: curl
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Lucas20000903/spire-remote-code/main/install.sh | sh
+```
+
+### Option 3: Build from source
+
 ## Quick Start
 
 ### 1. Build
@@ -219,6 +237,24 @@ MIT
 - **사이드바** — 워크스페이스별 세션 그룹핑, 즐겨찾기, 상태 표시
 - **알림** — 작업 완료 시 브라우저 알림
 - **다크 모드** — 시스템 설정 자동 감지
+
+### 설치
+
+#### 방법 1: npm / pnpm
+
+```bash
+npm install -g spire-remote-code
+# 또는
+pnpm add -g spire-remote-code
+```
+
+#### 방법 2: curl
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Lucas20000903/spire-remote-code/main/install.sh | sh
+```
+
+#### 방법 3: 소스에서 빌드
 
 ### 빠른 시작
 

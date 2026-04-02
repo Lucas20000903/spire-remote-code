@@ -1,0 +1,4 @@
+#!/bin/sh
+# Placeholder — replaced by postinstall with actual binary
+echo "spire binary not found. Run 'npm rebuild spire-remote-code' to download."
+exit 1
