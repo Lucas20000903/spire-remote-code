@@ -99,11 +99,23 @@ pub fn launch_cc() {
         args.push("--dangerously-skip-permissions".to_string());
     }
 
+    // expect를 사용해서 "Enter to confirm" 프롬프트 자동 확인
+    let has_expect = Command::new("expect").arg("-v").output().map(|o| o.status.success()).unwrap_or(false);
+    let claude_cmd = args.join(" ");
+
+    let full_cmd = if has_expect {
+        format!(
+            "expect -c 'set timeout 30; spawn {}; expect \"Enter to confirm\"; send \"\\r\"; interact'",
+            claude_cmd
+        )
+    } else {
+        claude_cmd.clone()
+    };
+
     if prefs.use_tmux {
         let session_name = format!("spire_{}", &uuid::Uuid::new_v4().to_string()[..8]);
-        let claude_cmd = args.join(" ");
         let status = Command::new("tmux")
-            .args(["new-session", "-d", "-s", &session_name, &claude_cmd])
+            .args(["new-session", "-d", "-s", &session_name, &full_cmd])
             .status();
 
         match status {
@@ -117,9 +129,18 @@ pub fn launch_cc() {
             }
         }
     } else {
-        let status = Command::new(&args[0])
-            .args(&args[1..])
-            .status();
+        let status = if has_expect {
+            Command::new("expect")
+                .args(["-c", &format!(
+                    "set timeout 30; spawn {}; expect \"Enter to confirm\"; send \"\\r\"; interact",
+                    claude_cmd
+                )])
+                .status()
+        } else {
+            Command::new(&args[0])
+                .args(&args[1..])
+                .status()
+        };
 
         match status {
             Ok(s) => std::process::exit(s.code().unwrap_or(1)),
