@@ -227,7 +227,7 @@ async fn handle_create_session(
 ) {
     let _ = state; // AppState may be needed for future session tracking
     if let Some(cwd) = msg["cwd"].as_str() {
-        match crate::session::tmux::create_session(cwd).await {
+        match crate::session::spawner::create_session(cwd).await {
             Ok(tmux_session) => {
                 let resp = serde_json::json!({
                     "type": "session_creating",
