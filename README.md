@@ -178,11 +178,11 @@ sequenceDiagram
 ## CLI
 
 ```bash
-# Run server
-spire
-
-# Reset auth (forgot password)
-spire reset-auth
+spire                # Start server (default port 3000)
+spire -p 8080        # Start server on custom port
+spire cc             # Launch Claude Code with Spire channel
+spire setup          # Interactive setup (MCP registration + preferences)
+spire reset-auth     # Reset auth (forgot password)
 ```
 
 ## Project Structure

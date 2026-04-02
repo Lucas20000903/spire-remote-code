@@ -1,5 +1,6 @@
 mod auth;
 mod bridge;
+mod cli;
 mod config;
 mod db;
 mod error;
@@ -34,12 +35,20 @@ use bridge::registry::BridgeRegistry;
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
+
+    /// Server port (default: 3000, or $PORT env)
+    #[arg(short, long)]
+    port: Option<u16>,
 }
 
 #[derive(Subcommand)]
 enum Commands {
     /// Reset auth (delete account, next visit triggers re-setup)
     ResetAuth,
+    /// Launch Claude Code with Spire channel flags
+    Cc,
+    /// Interactive setup: register MCP server + configure preferences
+    Setup,
 }
 
 impl FromRef<AppState> for DbPool {
@@ -96,11 +105,22 @@ async fn main() {
             println!("Auth reset. Next web visit will prompt for account setup.");
             return;
         }
+        Some(Commands::Cc) => {
+            cli::launch_cc();
+            return;
+        }
+        Some(Commands::Setup) => {
+            cli::run_setup();
+            return;
+        }
         None => {}
     }
 
     tracing_subscriber::fmt::init();
-    let config = AppConfig::from_env();
+    let mut config = AppConfig::from_env();
+    if let Some(port) = cli.port {
+        config.port = port;
+    }
 
     let db = db::init_db(&config.db_path).expect("failed to initialize database");
     let registry = BridgeRegistry::new();
