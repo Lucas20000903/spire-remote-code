@@ -101,7 +101,7 @@ cargo build --release
 cd web && pnpm install && pnpm build && cd ..
 
 # Bridge
-cd bridge && bun install && cd ..
+cd bridge && npm install && cd ..
 ```
 
 ### 2. Run
@@ -117,7 +117,7 @@ Server starts at `http://0.0.0.0:3000`.
 Register the Bridge as a global MCP server in Claude Code:
 
 ```bash
-claude mcp add -s user spire bun /path/to/spire/bridge/bridge.ts
+claude mcp add -s user spire npx tsx /path/to/spire/bridge/bridge.ts
 ```
 
 ### 4. Claude Code Launch Config
@@ -323,7 +323,7 @@ cargo build --release
 cd web && pnpm install && pnpm build && cd ..
 
 # Bridge
-cd bridge && bun install && cd ..
+cd bridge && npm install && cd ..
 ```
 
 #### 2. 실행
@@ -339,7 +339,7 @@ STATIC_DIR=web/dist ./target/release/spire
 Claude Code에 Bridge를 글로벌 MCP 서버로 등록합니다:
 
 ```bash
-claude mcp add -s user spire bun /path/to/spire/bridge/bridge.ts
+claude mcp add -s user spire npx tsx /path/to/spire/bridge/bridge.ts
 ```
 
 #### 4. Claude Code 실행 설정

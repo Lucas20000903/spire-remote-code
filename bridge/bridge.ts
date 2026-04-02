@@ -1,22 +1,28 @@
-#!/usr/bin/env bun
+#!/usr/bin/env npx tsx
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js'
 import { z } from 'zod'
+import { createServer } from 'net'
 
 // --- Config ---
 const RUST_SERVER = process.env.BRIDGE_RUST_SERVER || 'http://localhost:3000'
 const PORT_MIN = parseInt(process.env.BRIDGE_PORT_MIN || '8800')
 const PORT_MAX = parseInt(process.env.BRIDGE_PORT_MAX || '8899')
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
 // --- Find free port ---
 async function findFreePort(): Promise<number> {
   for (let port = PORT_MIN; port <= PORT_MAX; port++) {
-    try {
-      const server = Bun.serve({ port, hostname: '127.0.0.1', fetch: () => new Response('') })
-      server.stop()
-      return port
-    } catch { continue }
+    const available = await new Promise<boolean>((resolve) => {
+      const srv = createServer()
+      srv.once('error', () => resolve(false))
+      srv.listen(port, '127.0.0.1', () => {
+        srv.close(() => resolve(true))
+      })
+    })
+    if (available) return port
   }
   throw new Error(`No free port in range ${PORT_MIN}-${PORT_MAX}`)
 }
@@ -57,7 +63,7 @@ async function connectSSE(id: string, mcp: Server) {
     try {
       const res = await fetch(url)
       if (!res.ok || !res.body) throw new Error(`SSE failed: ${res.status}`)
-      retryDelay = 1000 // reset on success
+      retryDelay = 1000
 
       const reader = res.body.getReader()
       const decoder = new TextDecoder()
@@ -84,7 +90,7 @@ async function connectSSE(id: string, mcp: Server) {
       }
     } catch (err) {
       console.error(`SSE error, retry in ${retryDelay}ms:`, err)
-      await Bun.sleep(retryDelay)
+      await sleep(retryDelay)
       retryDelay = Math.min(retryDelay * 2, 16000)
     }
   }
@@ -127,10 +133,8 @@ const mcp = new Server(
   },
 )
 
-// No reply tool — conversation is read from JSONL, not relayed through the bridge
 mcp.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [] }))
 
-// Permission relay
 const PermissionRequestSchema = z.object({
   method: z.literal('notifications/claude/channel/permission_request'),
   params: z.object({
@@ -158,7 +162,6 @@ mcp.setNotificationHandler(PermissionRequestSchema, async ({ params }) => {
 // --- Start ---
 const listenPort = await findFreePort()
 bridgeId = await register(listenPort)
-connectSSE(bridgeId, mcp) // runs in background
-// session_id는 Rust 서버가 JSONL watcher에서 자동 매칭
+connectSSE(bridgeId, mcp)
 
 await mcp.connect(new StdioServerTransport())
