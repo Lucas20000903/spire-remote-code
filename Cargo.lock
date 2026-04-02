@@ -1470,6 +1470,7 @@ dependencies = [
  "dirs",
  "futures",
  "jsonwebtoken",
+ "libc",
  "notify",
  "rusqlite",
  "serde",

@@ -34,6 +34,18 @@ pub fn init_db(path: &Path) -> anyhow::Result<DbPool> {
             cwd TEXT UNIQUE NOT NULL,
             created_at TEXT NOT NULL DEFAULT (datetime('now'))
         );
+        CREATE TABLE IF NOT EXISTS session (
+            id TEXT PRIMARY KEY,
+            session_id TEXT,
+            cwd TEXT NOT NULL,
+            pid INTEGER NOT NULL,
+            port INTEGER NOT NULL,
+            status TEXT NOT NULL DEFAULT 'active',
+            last_active TEXT NOT NULL DEFAULT (datetime('now')),
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_session_cwd ON session(cwd);
+        CREATE INDEX IF NOT EXISTS idx_session_pid ON session(pid);
     ",
     )?;
     Ok(Arc::new(Mutex::new(conn)))

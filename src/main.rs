@@ -49,6 +49,18 @@ enum Commands {
     Cc,
     /// Interactive setup: register MCP server + configure preferences
     Setup,
+    /// Restart the background server (LaunchAgent)
+    Restart,
+    /// Stop the background server
+    Stop,
+    /// Start the background server
+    Start,
+    /// Show whether the background server is running
+    Status,
+    /// Rebuild from source and restart the background server
+    Rebuild,
+    /// Start development server (cargo-watch + Vite HMR)
+    Dev,
 }
 
 impl FromRef<AppState> for DbPool {
@@ -114,6 +126,30 @@ async fn main() {
             cli::run_setup();
             return;
         }
+        Some(Commands::Restart) => {
+            cli::service_restart();
+            return;
+        }
+        Some(Commands::Stop) => {
+            cli::service_stop();
+            return;
+        }
+        Some(Commands::Start) => {
+            cli::service_start();
+            return;
+        }
+        Some(Commands::Status) => {
+            cli::service_status();
+            return;
+        }
+        Some(Commands::Rebuild) => {
+            cli::service_rebuild();
+            return;
+        }
+        Some(Commands::Dev) => {
+            cli::dev_server();
+            return;
+        }
         None => {}
     }
 
@@ -128,7 +164,7 @@ async fn main() {
     }
 
     let db = db::init_db(&config.db_path).expect("failed to initialize database");
-    let registry = BridgeRegistry::new();
+    let registry = BridgeRegistry::new(db.clone());
     let ws_hub = WsHub::new();
 
     let port = config.port;

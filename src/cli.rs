@@ -4,11 +4,24 @@ use std::process::Command;
 
 const PREFS_FILE: &str = ".spire/preferences.toml";
 
-#[derive(Default)]
 struct Preferences {
     use_tmux: bool,
     skip_permissions: bool,
     bridge_path: Option<String>,
+    port: u16,
+    repo_path: Option<String>,
+}
+
+impl Default for Preferences {
+    fn default() -> Self {
+        Self {
+            use_tmux: false,
+            skip_permissions: false,
+            bridge_path: None,
+            port: 3000,
+            repo_path: None,
+        }
+    }
 }
 
 fn prefs_path() -> PathBuf {
@@ -35,6 +48,19 @@ fn load_prefs() -> Preferences {
                 let val = val.trim().trim_matches('"').trim_matches('\'');
                 prefs.bridge_path = Some(val.to_string());
             }
+        } else if line.starts_with("port") {
+            if let Some(val) = line.split('=').nth(1) {
+                if let Ok(p) = val.trim().parse::<u16>() {
+                    prefs.port = p;
+                }
+            }
+        } else if line.starts_with("repo_path") {
+            if let Some(val) = line.split('=').nth(1) {
+                let val = val.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    prefs.repo_path = Some(val.to_string());
+                }
+            }
         }
     }
     prefs
@@ -46,10 +72,12 @@ fn save_prefs(prefs: &Preferences) {
         std::fs::create_dir_all(parent).ok();
     }
     let content = format!(
-        "use_tmux = {}\nskip_permissions = {}\nbridge_path = \"{}\"\n",
+        "use_tmux = {}\nskip_permissions = {}\nbridge_path = \"{}\"\nport = {}\nrepo_path = \"{}\"\n",
         prefs.use_tmux,
         prefs.skip_permissions,
         prefs.bridge_path.as_deref().unwrap_or(""),
+        prefs.port,
+        prefs.repo_path.as_deref().unwrap_or(""),
     );
     std::fs::write(&path, content).expect("failed to write preferences");
 }
@@ -158,11 +186,17 @@ pub fn run_setup() {
     // 3. skip permissions
     let skip_permissions = ask_yn("Skip permission prompts? (--dangerously-skip-permissions)", false);
 
+    // 4. port
+    let port_str = ask_string("Server port", "3000");
+    let port: u16 = port_str.parse().unwrap_or(3000);
+
     // Save preferences
     let prefs = Preferences {
         use_tmux,
         skip_permissions,
         bridge_path: Some(bridge_abs.to_string_lossy().to_string()),
+        port,
+        repo_path: None,
     };
     save_prefs(&prefs);
     println!("\n✓ Preferences saved to {}", prefs_path().display());
@@ -183,10 +217,10 @@ pub fn run_setup() {
         if !re_register {
             println!("✓ Keeping existing MCP registration");
         } else {
-            register_mcp(&bridge_str);
+            register_mcp(&bridge_str, port);
         }
     } else {
-        register_mcp(&bridge_str);
+        register_mcp(&bridge_str, port);
     }
 
     println!("\n🎉 Setup complete!");
@@ -196,11 +230,17 @@ pub fn run_setup() {
     println!("  spire setup  — Re-run this setup\n");
 }
 
-fn register_mcp(bridge_str: &str) {
+fn register_mcp(bridge_str: &str, port: u16) {
     println!("\nRegistering MCP server...");
+    // Remove existing first (ignore errors)
+    let _ = Command::new("claude")
+        .args(["mcp", "remove", "-s", "user", "spire"])
+        .output();
+    let env_arg = format!("BRIDGE_RUST_SERVER=http://localhost:{}", port);
     let status = Command::new("claude")
         .args([
             "mcp", "add", "-s", "user", "spire",
+            "-e", &env_arg,
             "npx", "tsx", bridge_str,
         ])
         .status();
@@ -220,7 +260,322 @@ fn register_mcp(bridge_str: &str) {
     }
 }
 
+const PLIST_LABEL: &str = "com.spire.server";
+
+fn plist_path() -> PathBuf {
+    dirs::home_dir()
+        .expect("home dir")
+        .join(format!("Library/LaunchAgents/{}.plist", PLIST_LABEL))
+}
+
+fn launchctl_uid() -> String {
+    let uid = Command::new("id").arg("-u").output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_else(|_| "501".to_string());
+    format!("gui/{}", uid)
+}
+
+pub fn service_stop() {
+    let domain = format!("{}/{}", launchctl_uid(), PLIST_LABEL);
+    let status = Command::new("launchctl")
+        .args(["bootout", &domain])
+        .status();
+    match status {
+        Ok(s) if s.success() => println!("Spire stopped."),
+        _ => eprintln!("Spire is not running."),
+    }
+}
+
+pub fn service_start() {
+    let plist = plist_path();
+    if !plist.exists() {
+        eprintln!("LaunchAgent not installed. Run install.sh first.");
+        return;
+    }
+    let domain = launchctl_uid();
+    let status = Command::new("launchctl")
+        .args(["bootstrap", &domain, &plist.to_string_lossy()])
+        .status();
+    match status {
+        Ok(s) if s.success() => println!("Spire started."),
+        _ => eprintln!("Failed to start. Already running?"),
+    }
+}
+
+pub fn service_restart() {
+    let domain_label = format!("{}/{}", launchctl_uid(), PLIST_LABEL);
+    let _ = Command::new("launchctl")
+        .args(["bootout", &domain_label])
+        .status();
+    let plist = plist_path();
+    if !plist.exists() {
+        eprintln!("LaunchAgent not installed. Run install.sh first.");
+        return;
+    }
+    let domain = launchctl_uid();
+    let status = Command::new("launchctl")
+        .args(["bootstrap", &domain, &plist.to_string_lossy()])
+        .status();
+    match status {
+        Ok(s) if s.success() => println!("Spire restarted."),
+        _ => eprintln!("Failed to restart."),
+    }
+}
+
+pub fn service_status() {
+    let domain_label = format!("{}/{}", launchctl_uid(), PLIST_LABEL);
+    let output = Command::new("launchctl")
+        .args(["print", &domain_label])
+        .output();
+    match output {
+        Ok(o) if o.status.success() => {
+            let out = String::from_utf8_lossy(&o.stdout);
+            let pid = out.lines()
+                .find(|l| l.contains("pid ="))
+                .and_then(|l| l.split('=').nth(1))
+                .map(|s| s.trim().to_string());
+            let prefs = load_prefs();
+            println!("Spire is running.");
+            if let Some(pid) = pid {
+                println!("  PID:  {}", pid);
+            }
+            println!("  Port: {}", prefs.port);
+            println!("  URL:  http://localhost:{}", prefs.port);
+        }
+        _ => println!("Spire is not running."),
+    }
+}
+
+pub fn service_rebuild() {
+    // Find repo root (where Cargo.toml is)
+    let repo = find_repo_root();
+    let Some(repo) = repo else {
+        eprintln!("Cannot find project root (Cargo.toml). Run from the repo directory or run 'spire setup' first.");
+        return;
+    };
+
+    // repo 경로 저장 (다음번엔 어디서든 rebuild 가능)
+    let mut prefs = load_prefs();
+    let repo_str = repo.to_string_lossy().to_string();
+    if prefs.repo_path.as_deref() != Some(&repo_str) {
+        prefs.repo_path = Some(repo_str);
+        save_prefs(&prefs);
+    }
+
+    let data_dir = dirs::home_dir().unwrap().join(".spire");
+    let install_dir = dirs::home_dir().unwrap().join(".local/bin");
+
+    // 1. Build Rust
+    println!("[1/3] Building server...");
+    let status = Command::new("cargo")
+        .args(["build", "--release"])
+        .current_dir(&repo)
+        .env("RUSTFLAGS", "-A warnings")
+        .status();
+    if !matches!(status, Ok(s) if s.success()) {
+        eprintln!("Rust build failed.");
+        return;
+    }
+
+    // 2. Build frontend
+    println!("[2/3] Building frontend...");
+    let status = Command::new("pnpm")
+        .args(["build"])
+        .current_dir(repo.join("web"))
+        .status();
+    if !matches!(status, Ok(s) if s.success()) {
+        eprintln!("Frontend build failed.");
+        return;
+    }
+
+    // 3. Copy
+    println!("[3/3] Installing...");
+    std::fs::create_dir_all(&install_dir).ok();
+    std::fs::create_dir_all(data_dir.join("web")).ok();
+    let _ = std::fs::copy(repo.join("target/release/spire"), install_dir.join("spire"));
+    // Copy web/dist contents
+    if let Ok(entries) = std::fs::read_dir(repo.join("web/dist")) {
+        for entry in entries.flatten() {
+            let dest = data_dir.join("web").join(entry.file_name());
+            if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                copy_dir_all(&entry.path(), &dest).ok();
+            } else {
+                std::fs::copy(entry.path(), dest).ok();
+            }
+        }
+    }
+
+    // Restart
+    service_restart();
+}
+
+fn copy_dir_all(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let dest = dst.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_dir_all(&entry.path(), &dest)?;
+        } else {
+            std::fs::copy(entry.path(), dest)?;
+        }
+    }
+    Ok(())
+}
+
+fn find_repo_root() -> Option<PathBuf> {
+    // 1. Check cwd and parents for Cargo.toml with name = "spire"
+    if let Ok(mut dir) = std::env::current_dir() {
+        loop {
+            if dir.join("Cargo.toml").exists() {
+                if let Ok(content) = std::fs::read_to_string(dir.join("Cargo.toml")) {
+                    if content.contains("name = \"spire\"") {
+                        return Some(dir);
+                    }
+                }
+            }
+            if !dir.pop() { break; }
+        }
+    }
+    // 2. Fallback: saved repo_path in preferences
+    let prefs = load_prefs();
+    if let Some(ref p) = prefs.repo_path {
+        let dir = PathBuf::from(p);
+        if dir.join("Cargo.toml").exists() {
+            return Some(dir);
+        }
+    }
+
+    // Check relative to executable
+    let exe = std::env::current_exe().ok()?;
+    let exe_dir = exe.parent()?;
+    for dir in [exe_dir, exe_dir.parent()?, exe_dir.parent()?.parent()?] {
+        if dir.join("Cargo.toml").exists() {
+            return Some(dir.to_path_buf());
+        }
+    }
+
+    None
+}
+
+/// `spire dev` — cargo-watch (port 3001) + Vite dev server (port 3000) 동시 실행
+pub fn dev_server() {
+    let repo = find_repo_root();
+    let Some(repo) = repo else {
+        eprintln!("Cannot find project root (Cargo.toml). Run from the repo directory.");
+        std::process::exit(1);
+    };
+
+    // cargo-watch 설치 여부 확인
+    let has_cargo_watch = Command::new("cargo")
+        .args(["watch", "--version"])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+
+    if !has_cargo_watch {
+        eprintln!("cargo-watch is required for 'spire dev'.");
+        eprintln!("Install with: cargo install cargo-watch");
+        std::process::exit(1);
+    }
+
+    println!("\n  Spire Dev Mode\n");
+    println!("  Frontend : http://localhost:3000  (Vite HMR)");
+    println!("  Backend  : http://localhost:3001  (cargo-watch)");
+    println!("  Open http://localhost:3000 on your phone\n");
+
+    // Rust server (cargo-watch, port 3001, debug 빌드, STATIC_DIR 없음)
+    let mut rust_proc = Command::new("cargo")
+        .args(["watch", "-x", "run -- -p 3001"])
+        .current_dir(&repo)
+        .env_remove("STATIC_DIR")
+        .spawn()
+        .expect("failed to start cargo-watch");
+
+    // Vite dev server (port 3000, proxy → 3001)
+    let mut vite_proc = Command::new("pnpm")
+        .args(["dev"])
+        .current_dir(repo.join("web"))
+        .spawn()
+        .expect("failed to start Vite dev server");
+
+    // 하나라도 종료되면 다른 것도 종료
+    let rust_id = rust_proc.id();
+    let vite_id = vite_proc.id();
+
+    // Ctrl+C 핸들링: 두 프로세스 모두 종료
+    let (tx, rx) = std::sync::mpsc::channel();
+    ctrlc_channel(tx);
+
+    loop {
+        // Ctrl+C 수신 확인
+        if rx.try_recv().is_ok() {
+            kill_proc(rust_id);
+            kill_proc(vite_id);
+            let _ = rust_proc.wait();
+            let _ = vite_proc.wait();
+            println!("\n  Dev server stopped.");
+            break;
+        }
+
+        // 자식 프로세스 종료 확인
+        if let Ok(Some(_)) = rust_proc.try_wait() {
+            eprintln!("cargo-watch exited unexpectedly.");
+            kill_proc(vite_id);
+            let _ = vite_proc.wait();
+            break;
+        }
+        if let Ok(Some(_)) = vite_proc.try_wait() {
+            eprintln!("Vite dev server exited unexpectedly.");
+            kill_proc(rust_id);
+            let _ = rust_proc.wait();
+            break;
+        }
+
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+}
+
+fn ctrlc_channel(tx: std::sync::mpsc::Sender<()>) {
+    std::thread::spawn(move || {
+        // SIGINT/SIGTERM 대기 (간단한 방식)
+        let (sig_tx, sig_rx) = std::sync::mpsc::channel();
+        let _ = unsafe {
+            libc::signal(libc::SIGINT, signal_handler as *const () as libc::sighandler_t);
+            libc::signal(libc::SIGTERM, signal_handler as *const () as libc::sighandler_t);
+        };
+        // static channel로 시그널 전달
+        SIGNAL_TX.lock().unwrap().replace(sig_tx);
+        if sig_rx.recv().is_ok() {
+            let _ = tx.send(());
+        }
+    });
+}
+
+static SIGNAL_TX: std::sync::Mutex<Option<std::sync::mpsc::Sender<()>>> =
+    std::sync::Mutex::new(None);
+
+extern "C" fn signal_handler(_: libc::c_int) {
+    if let Some(tx) = SIGNAL_TX.lock().ok().and_then(|g| g.as_ref().cloned()) {
+        let _ = tx.send(());
+    }
+}
+
+fn kill_proc(pid: u32) {
+    unsafe {
+        libc::kill(pid as i32, libc::SIGTERM);
+    }
+}
+
 fn find_bridge_path() -> Option<String> {
+    // Check installed location (~/.spire/bridge/bridge.ts)
+    if let Some(home) = dirs::home_dir() {
+        let candidate = home.join(".spire/bridge/bridge.ts");
+        if candidate.exists() {
+            return Some(candidate.to_string_lossy().to_string());
+        }
+    }
+
     // Check relative to cwd
     let cwd = std::env::current_dir().ok()?;
     let candidate = cwd.join("bridge/bridge.ts");
@@ -231,7 +586,6 @@ fn find_bridge_path() -> Option<String> {
     // Check relative to executable
     let exe = std::env::current_exe().ok()?;
     let exe_dir = exe.parent()?;
-    // executable might be in target/release, go up
     for dir in [exe_dir, exe_dir.parent()?, exe_dir.parent()?.parent()?] {
         let candidate = dir.join("bridge/bridge.ts");
         if candidate.exists() {
