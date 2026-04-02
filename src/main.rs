@@ -116,6 +116,10 @@ async fn main() {
         None => {}
     }
 
+    // RUST_LOG 미설정이면 info로 기본값
+    if std::env::var("RUST_LOG").is_err() {
+        std::env::set_var("RUST_LOG", "info");
+    }
     tracing_subscriber::fmt::init();
     let mut config = AppConfig::from_env();
     if let Some(port) = cli.port {
@@ -343,7 +347,8 @@ async fn main() {
     }
 
     let addr = format!("0.0.0.0:{}", port);
-    tracing::info!("listening on {}", addr);
+    println!("\n  ⛰️  Spire v{}", env!("CARGO_PKG_VERSION"));
+    println!("  Server: http://{}\n", addr);
     let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();
 }
