@@ -33,6 +33,14 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
 
     send({ type: 'list_sessions' })
 
+    // 탭 활성화 시 세션 목록 갱신
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') {
+        send({ type: 'list_sessions' })
+      }
+    }
+    document.addEventListener('visibilitychange', onVisible)
+
     return onMessage((msg: WsServerMessage) => {
       if (msg.type === 'sessions') {
         setActive((prev) => {
@@ -120,6 +128,10 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
         }
       }
     })
+
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible)
+    }
   }, [status, send, onMessage, navigate])
 
   const createSession = useCallback(
