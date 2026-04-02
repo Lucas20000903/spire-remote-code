@@ -137,11 +137,6 @@ pub fn run_setup() {
     println!("\n  Spire Setup\n");
 
     // 1. Bridge path
-    let exe_dir = std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|p| p.to_path_buf()))
-        .unwrap_or_default();
-
     // Try to find bridge.ts relative to executable or cwd
     let default_bridge = find_bridge_path()
         .unwrap_or_else(|| "bridge/bridge.ts".to_string());

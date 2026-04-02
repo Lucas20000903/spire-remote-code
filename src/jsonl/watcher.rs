@@ -9,7 +9,6 @@ use super::parser::{parse_entry, Content, ContentBlock, TranscriptEntry};
 #[derive(Clone, Debug)]
 pub struct JsonlUpdate {
     pub session_id: String,
-    pub project_dir: String, // e.g. "-Users-lucas-workspace-foo"
     pub entries: Vec<TranscriptEntry>,
 }
 
@@ -66,17 +65,10 @@ impl JsonlWatcher {
                 let offset = offsets.get(&path).copied().unwrap_or(0);
                 match Self::read_new_lines(&path, offset).await {
                     Ok((entries, new_offset)) if !entries.is_empty() => {
-                        // 파일 경로에서 프로젝트 디렉토리명 추출
-                        let project_dir = path.parent()
-                            .and_then(|p| p.file_name())
-                            .and_then(|n| n.to_str())
-                            .unwrap_or("")
-                            .to_string();
                         offsets.insert(path, new_offset);
                         if let Some(session_id) = entries.first().map(|e| e.session_id.clone()) {
                             let _ = tx.send(JsonlUpdate {
                                 session_id,
-                                project_dir,
                                 entries,
                             });
                         }
@@ -122,9 +114,6 @@ impl JsonlWatcher {
         Ok((entries, current_offset))
     }
 
-    pub fn subscribe(&self) -> broadcast::Receiver<JsonlUpdate> {
-        self.update_tx.subscribe()
-    }
 }
 
 /// cwd에서 프로젝트 디렉토리 내 가장 최근 JSONL 파일 찾기

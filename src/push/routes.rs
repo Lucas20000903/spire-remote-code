@@ -59,41 +59,6 @@ pub async fn subscribe(
     Ok(Json(serde_json::json!({"ok": true})))
 }
 
-/// Internal function to send push notifications when WebSocket is not connected.
-/// Currently a stub that logs the intent; actual web-push sending is a TODO.
-pub async fn send_push_notification(
-    db: &DbPool,
-    title: &str,
-    body: &str,
-    _data: &serde_json::Value,
-) -> anyhow::Result<()> {
-    let subscriptions = {
-        let conn = db.lock().unwrap();
-        let mut stmt = conn.prepare("SELECT endpoint, p256dh, auth FROM push_subscription")?;
-        let subs: Vec<(String, String, String)> = stmt
-            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
-            .map_err(|e| anyhow::anyhow!(e))?
-            .filter_map(|r| r.ok())
-            .collect();
-        subs
-    };
-
-    if subscriptions.is_empty() {
-        tracing::debug!("No push subscriptions registered, skipping push");
-        return Ok(());
-    }
-
-    // TODO: Implement actual web-push sending using a web-push crate.
-    // This requires proper VAPID ECDSA P-256 key handling.
-    tracing::info!(
-        "Would send push to {} subscriber(s): {} - {}",
-        subscriptions.len(),
-        title,
-        body
-    );
-
-    Ok(())
-}
 
 struct VapidKeyPair {
     public_key: String,

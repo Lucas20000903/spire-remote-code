@@ -1,4 +1,3 @@
-use std::path::PathBuf;
 use tokio::process::Command;
 
 fn load_skip_permissions() -> bool {
@@ -45,18 +44,3 @@ pub async fn create_session(cwd: &str) -> anyhow::Result<String> {
     Ok(session_name)
 }
 
-/// List all active tmux sessions whose names start with "claude-".
-pub async fn list_sessions() -> anyhow::Result<Vec<String>> {
-    let output = Command::new("tmux")
-        .args(["list-sessions", "-F", "#{session_name}"])
-        .output()
-        .await?;
-
-    let names = String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .filter(|l| l.starts_with("claude-"))
-        .map(String::from)
-        .collect();
-
-    Ok(names)
-}

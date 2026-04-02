@@ -39,19 +39,3 @@ pub fn init_db(path: &Path) -> anyhow::Result<DbPool> {
     Ok(Arc::new(Mutex::new(conn)))
 }
 
-pub fn get_config(db: &DbPool, key: &str) -> Option<String> {
-    let conn = db.lock().unwrap();
-    conn.query_row("SELECT value FROM config WHERE key = ?1", [key], |row| {
-        row.get(0)
-    })
-    .ok()
-}
-
-pub fn set_config(db: &DbPool, key: &str, value: &str) -> anyhow::Result<()> {
-    let conn = db.lock().unwrap();
-    conn.execute(
-        "INSERT OR REPLACE INTO config (key, value) VALUES (?1, ?2)",
-        [key, value],
-    )?;
-    Ok(())
-}
