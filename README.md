@@ -73,21 +73,13 @@ Yes. As long as your phone can reach your Mac's IP on port 3000, it works. Tails
 
 ## Installation
 
-### Option 1: npm / pnpm
-
-```bash
-npm install -g spire-remote-code
-# or
-pnpm add -g spire-remote-code
-```
-
-### Option 2: curl
+### Option 1: curl
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Lucas20000903/spire-remote-code/main/install.sh | sh
 ```
 
-### Option 3: Build from source
+### Option 2: Build from source
 
 ## Quick Start
 

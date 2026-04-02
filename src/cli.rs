@@ -155,8 +155,9 @@ pub fn run_setup() {
         eprintln!("Warning: Bridge file not found at {}", bridge_abs.display());
     }
 
-    // 2. tmux
-    let use_tmux = ask_yn("Run Claude Code inside tmux sessions?", true);
+    // 2. tmux (기본값: tmux 설치되어 있으면 Y)
+    let tmux_available = Command::new("tmux").arg("-V").output().map(|o| o.status.success()).unwrap_or(false);
+    let use_tmux = ask_yn("Run Claude Code inside tmux sessions?", tmux_available);
 
     // 3. skip permissions
     let skip_permissions = ask_yn("Skip permission prompts? (--dangerously-skip-permissions)", false);
@@ -171,12 +172,40 @@ pub fn run_setup() {
     println!("\n✓ Preferences saved to {}", prefs_path().display());
 
     // 4. Register MCP server
-    println!("\nRegistering MCP server...");
     let bridge_str = bridge_abs.to_string_lossy();
+
+    // Check if already registered
+    let existing = Command::new("claude")
+        .args(["mcp", "list"])
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .unwrap_or_default();
+
+    if existing.contains("spire") {
+        let re_register = ask_yn("MCP server 'spire' is already registered. Re-register?", false);
+        if !re_register {
+            println!("✓ Keeping existing MCP registration");
+        } else {
+            register_mcp(&bridge_str);
+        }
+    } else {
+        register_mcp(&bridge_str);
+    }
+
+    println!("\n🎉 Setup complete!");
+    println!("\nUsage:");
+    println!("  spire        — Start the web server");
+    println!("  spire cc     — Launch Claude Code with Spire");
+    println!("  spire setup  — Re-run this setup\n");
+}
+
+fn register_mcp(bridge_str: &str) {
+    println!("\nRegistering MCP server...");
     let status = Command::new("claude")
         .args([
             "mcp", "add", "-s", "user", "spire",
-            "npx", "tsx", &bridge_str,
+            "npx", "tsx", bridge_str,
         ])
         .status();
 
@@ -193,12 +222,6 @@ pub fn run_setup() {
             eprintln!("  Then run: claude mcp add -s user spire npx tsx {}", bridge_str);
         }
     }
-
-    println!("\n🎉 Setup complete!");
-    println!("\nUsage:");
-    println!("  spire        — Start the web server");
-    println!("  spire cc     — Launch Claude Code with Spire");
-    println!("  spire setup  — Re-run this setup\n");
 }
 
 fn find_bridge_path() -> Option<String> {
