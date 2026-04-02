@@ -5,7 +5,8 @@ import { motion, AnimatePresence } from 'motion/react'
 import { SidebarContent } from './sidebar'
 import { ConnectionBanner } from './connection-banner'
 import { useSessions } from '@/hooks/use-sessions'
-import { Menu } from 'lucide-react'
+import { Menu, Monitor } from 'lucide-react'
+import { WebViewPanel } from '@/components/webview/webview-panel'
 
 interface HeaderTitle {
   project: string
@@ -51,6 +52,7 @@ export function AppLayout() {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
   const [desktopSidebarOpen, setDesktopSidebarOpen] = useState(true)
   const [title, setTitle] = useState<HeaderTitle | null>(null)
+  const [webviewOpen, setWebviewOpen] = useState(false)
 
   const sidebarOpen = isDesktop ? desktopSidebarOpen : mobileSidebarOpen
   const setSidebarOpen = isDesktop ? setDesktopSidebarOpen : setMobileSidebarOpen
@@ -149,6 +151,12 @@ export function AppLayout() {
                 )}
               </div>
             )}
+            <button
+              onClick={() => setWebviewOpen((v) => !v)}
+              className="pointer-events-auto ml-auto flex h-10 w-10 shrink-0 aspect-square items-center justify-center rounded-full bg-background/75 backdrop-blur-xl text-muted-foreground hover:text-foreground gradient-border"
+            >
+              <Monitor className="h-4 w-4" />
+            </button>
           </div>
 
           {/* Content */}
@@ -157,6 +165,7 @@ export function AppLayout() {
           </div>
         </div>
       </div>
+      <WebViewPanel open={webviewOpen} onClose={() => setWebviewOpen(false)} />
     </LayoutContext.Provider>
   )
 }
