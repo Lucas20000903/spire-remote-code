@@ -159,19 +159,6 @@ code, kbd, samp, pre {
   font-size: inherit !important;
 }
 
-/* Mobile sidebar slide */
-.sidebar-open {
-  left: 300px;
-  border-top-left-radius: 16px;
-  border-bottom-left-radius: 16px;
-}
-
-/* Fade in up animation */
-@keyframes fadeInUp {
-  from { opacity: 0; transform: translateY(12px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
 /* Session progress shimmer */
 @keyframes progress-shimmer {
   0% { transform: translateX(-100%); }

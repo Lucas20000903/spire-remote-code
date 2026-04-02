@@ -90,6 +90,8 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
         }
 
         setActive((prev) => {
+          const found = prev.find((s) => s.bridge_id === bid)
+          if (newStatus) console.log('[sessions] status update', { bid: bid.slice(0, 12), newStatus, found: !!found })
           return prev.map((s) => {
             if (s.bridge_id !== bid) return s
             const updates: Partial<SessionInfo> = {}

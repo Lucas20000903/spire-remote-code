@@ -103,15 +103,12 @@ export function MessageList({
 
   const isInitialLoad = useRef(true)
 
-  const scrollToBottom = useCallback((smooth = true) => {
+  const scrollToBottom = useCallback(() => {
+    const el = containerRef.current
+    if (!el) return
     isProgrammaticScroll.current = true
-    if (smooth) {
-      bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-      setTimeout(() => { isProgrammaticScroll.current = false }, 500)
-    } else {
-      bottomRef.current?.scrollIntoView()
-      requestAnimationFrame(() => { isProgrammaticScroll.current = false })
-    }
+    el.scrollTop = el.scrollHeight
+    requestAnimationFrame(() => { isProgrammaticScroll.current = false })
   }, [])
 
   useEffect(() => {
@@ -120,13 +117,13 @@ export function MessageList({
 
     if (isInitialLoad.current) {
       isInitialLoad.current = false
-      scrollToBottom(false)
+      scrollToBottom()
     } else if (isLoadingMore.current && el) {
       const newScrollHeight = el.scrollHeight
       el.scrollTop = newScrollHeight - prevScrollHeightRef.current
       isLoadingMore.current = false
     } else if (shouldAutoScroll.current && !userScrolledUp.current) {
-      scrollToBottom(true)
+      scrollToBottom()
     }
   }, [messages, scrollToBottom])
 

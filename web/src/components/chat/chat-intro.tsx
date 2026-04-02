@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
+import { motion } from 'motion/react'
 import { fetchProjects, fetchFavorites, addFavorite, removeFavorite } from '@/lib/api'
 import { FolderOpen, Star, Search } from 'lucide-react'
 import { useSessions } from '@/hooks/use-sessions'
@@ -74,13 +75,23 @@ export function ChatIntro() {
   return (
     <div className="flex min-h-0 flex-1 flex-col items-center px-6 pt-24">
       {/* Logo + Search */}
-      <div className="mb-8 shrink-0 text-center animate-[fadeInUp_0.35s_ease-out]">
+      <motion.div
+        className="mb-8 shrink-0 text-center"
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.35, ease: [0.25, 0.1, 0.25, 1] }}
+      >
         <img src="/logo-light.svg" alt="Spire" className="mx-auto h-10 dark:hidden" />
         <img src="/logo-dark.svg" alt="Spire" className="mx-auto h-10 hidden dark:block" />
         <p className="mt-3 text-sm text-muted-foreground">Select a workspace to start</p>
-      </div>
+      </motion.div>
 
-      <div className="mb-4 w-full max-w-sm shrink-0 animate-[fadeInUp_0.35s_ease-out_0.1s_both]">
+      <motion.div
+        className="mb-4 w-full max-w-sm shrink-0"
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.35, delay: 0.1, ease: [0.25, 0.1, 0.25, 1] }}
+      >
         <div className="flex items-center gap-2 rounded-xl border px-3 py-2.5">
           <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
           <input
@@ -91,10 +102,15 @@ export function ChatIntro() {
             className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
           />
         </div>
-      </div>
+      </motion.div>
 
       {/* Project list */}
-      <div className="relative w-full max-w-sm min-h-0 flex-1 animate-[fadeInUp_0.4s_ease-out_0.2s_both]">
+      <motion.div
+        className="relative w-full max-w-sm min-h-0 flex-1"
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4, delay: 0.2, ease: [0.25, 0.1, 0.25, 1] }}
+      >
         {scrollShadow.top && (
           <div className="pointer-events-none absolute inset-x-0 top-0 z-[5] h-6" style={{ background: 'linear-gradient(to bottom, var(--color-background), transparent)' }} />
         )}
@@ -132,7 +148,7 @@ export function ChatIntro() {
         {scrollShadow.bottom && (
           <div className="pointer-events-none absolute inset-x-0 bottom-0 z-[5] h-6" style={{ background: 'linear-gradient(to top, var(--color-background), transparent)' }} />
         )}
-      </div>
+      </motion.div>
     </div>
   )
 }

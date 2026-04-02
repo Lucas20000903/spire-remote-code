@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
+import { motion } from 'motion/react'
 import { useSessions } from '@/hooks/use-sessions'
 import { useWebSocket } from '@/hooks/use-websocket'
 import { fetchFavorites } from '@/lib/api'
@@ -128,10 +129,13 @@ export function SidebarContent({ onSelect }: SidebarContentProps) {
         {[
           ...favorites.map((cwd) => ({ cwd, sessions: grouped.get(cwd) || [], isFav: true })),
           ...nonFavGroups.map(([cwd, sessions]) => ({ cwd, sessions, isFav: false })),
-        ].map((group) => (
-          <div
+        ].map((group, i) => (
+          <motion.div
             key={group.cwd}
             className="mb-1"
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.3, delay: i * 0.05, ease: [0.25, 0.1, 0.25, 1] }}
           >
             <div className="flex items-center justify-between px-2 pt-3 pb-1">
               <div className="flex items-center gap-1">
@@ -170,7 +174,7 @@ export function SidebarContent({ onSelect }: SidebarContentProps) {
                 </button>
               )
             })}
-          </div>
+          </motion.div>
         ))}
 
         {scrollShadow.bottom && (

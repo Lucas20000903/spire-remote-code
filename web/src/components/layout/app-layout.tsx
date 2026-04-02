@@ -1,5 +1,6 @@
-import { createContext, useContext, useState, useEffect, useRef } from 'react'
+import { createContext, useContext, useState, useEffect, useMemo } from 'react'
 import { Outlet } from 'react-router-dom'
+import { motion, AnimatePresence } from 'motion/react'
 
 import { SidebarContent } from './sidebar'
 import { ConnectionBanner } from './connection-banner'
@@ -25,20 +26,16 @@ const SIDEBAR_W = 280
 const MD_BREAKPOINT = 768
 
 function useIsDesktop() {
-  const ref = useRef(typeof window !== 'undefined' && window.innerWidth >= MD_BREAKPOINT)
-  const [, forceRender] = useState(0)
+  const [isDesktop, setIsDesktop] = useState(
+    () => typeof window !== 'undefined' && window.innerWidth >= MD_BREAKPOINT
+  )
   useEffect(() => {
     const mq = window.matchMedia(`(min-width: ${MD_BREAKPOINT}px)`)
-    const handler = (e: MediaQueryListEvent) => {
-      if (ref.current !== e.matches) {
-        ref.current = e.matches
-        forceRender((n) => n + 1)
-      }
-    }
+    const handler = (e: MediaQueryListEvent) => setIsDesktop(e.matches)
     mq.addEventListener('change', handler)
     return () => mq.removeEventListener('change', handler)
   }, [])
-  return ref.current
+  return isDesktop
 }
 
 function CompletedBadge() {
@@ -58,13 +55,14 @@ export function AppLayout() {
   const sidebarOpen = isDesktop ? desktopSidebarOpen : mobileSidebarOpen
   const setSidebarOpen = isDesktop ? setDesktopSidebarOpen : setMobileSidebarOpen
 
-  const contentRef = useRef<HTMLDivElement>(null)
+  const mobileSlideX = 'calc(100dvw - 72px)'
 
-  useEffect(() => {
-    if (contentRef.current) {
-      contentRef.current.style.paddingLeft = isDesktop ? `${SIDEBAR_W + 24}px` : '0'
-    }
-  }, [isDesktop])
+  const contentStyle = useMemo(() => {
+    if (isDesktop) return { paddingLeft: SIDEBAR_W + 24, boxShadow: 'none' }
+    return sidebarOpen
+      ? { paddingLeft: 0, boxShadow: '-1px 0 0 0 rgba(255,255,255,0.1), -2px 0 0 0 rgba(0,0,0,0.5)' }
+      : { paddingLeft: 0, boxShadow: 'none' }
+  }, [isDesktop, sidebarOpen])
 
   return (
     <LayoutContext.Provider value={{ setTitle }}>
@@ -86,7 +84,7 @@ export function AppLayout() {
           /* Mobile: sidebar behind content */
           <div
             className="fixed left-0 top-0 z-0 flex h-full flex-col bg-background"
-            style={{ width: 'calc(100dvw - 72px)' }}
+            style={{ width: mobileSlideX }}
           >
             <div className="flex h-16 items-center justify-between px-4">
               <img src="/logo-light.svg" alt="Spire" className="h-7 dark:hidden" />
@@ -98,18 +96,27 @@ export function AppLayout() {
 
         {/* ---- Main content ---- */}
         <div
-          ref={contentRef}
-          className={`relative left-0 z-10 flex min-w-0 flex-1 flex-col bg-background overflow-hidden ${
-            !isDesktop && sidebarOpen ? 'sidebar-open' : ''
-          }`}
+          className="noise relative z-10 flex min-w-0 flex-1 flex-col bg-background overflow-hidden transition-[transform,border-radius] duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)]"
+          style={{
+            ...contentStyle,
+            transform: !isDesktop && sidebarOpen ? `translateX(${mobileSlideX})` : 'translateX(0)',
+            borderTopLeftRadius: !isDesktop && sidebarOpen ? 16 : 0,
+            borderBottomLeftRadius: !isDesktop && sidebarOpen ? 16 : 0,
+          }}
           onClick={!isDesktop && sidebarOpen ? () => setSidebarOpen(false) : undefined}
         >
           {/* Dark overlay when sidebar open on mobile */}
-          <div
-            className={`absolute inset-0 z-30 bg-black pointer-events-none ${
-              !isDesktop && sidebarOpen ? 'opacity-40' : 'opacity-0'
-            }`}
-          />
+          <AnimatePresence>
+            {!isDesktop && sidebarOpen && (
+              <motion.div
+                className="absolute inset-0 z-30 bg-black pointer-events-none"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 0.4 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.3 }}
+              />
+            )}
+          </AnimatePresence>
 
           <ConnectionBanner />
 
