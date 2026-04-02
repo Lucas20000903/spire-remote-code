@@ -149,86 +149,22 @@ alias claude='claude --dangerously-load-development-channels server:spire'
 3. Log in and see active sessions
 4. Install as PWA (browser menu → "Add to Home Screen")
 
-## Architecture
-
-```mermaid
-graph TB
-  subgraph Mac
-    subgraph Rust["Rust Server :3000"]
-      Auth["Auth<br/>(SQLite)"]
-      Registry["Session<br/>Registry"]
-      Watcher["JSONL<br/>Watcher"]
-      WS["WebSocket<br/>Hub"]
-      Router["Bridge<br/>Router"]
-      Upload["File<br/>Upload"]
-    end
-
-    Bridge0["Bridge :8800"]
-    Bridge1["Bridge :8801"]
-    Bridge2["Bridge :8802"]
-
-    CC0["Claude Code (0)"]
-    CC1["Claude Code (1)"]
-    CC2["Claude Code (2)"]
-
-    Router -- "HTTP/SSE" --> Bridge0
-    Router -- "HTTP/SSE" --> Bridge1
-    Router -- "HTTP/SSE" --> Bridge2
-
-    Bridge0 -- "stdio" --> CC0
-    Bridge1 -- "stdio" --> CC1
-    Bridge2 -- "stdio" --> CC2
-
-    CC0 -. "writes jsonl" .-> Watcher
-    CC1 -. "writes jsonl" .-> Watcher
-    CC2 -. "writes jsonl" .-> Watcher
-  end
-
-  Phone["📱 Phone (PWA)<br/>React + Vite"]
-  Phone -- "WebSocket" --> WS
-  Watcher -- "jsonl_update" --> WS
-```
-
-### Data Flow
+## Data Flow
 
 ```mermaid
 sequenceDiagram
-    participant P as Phone
+    participant P as 📱 Phone
     participant R as Rust Server
-    participant B as Bridge
+    participant B as Bridge (MCP)
     participant C as Claude Code
-    participant J as JSONL File
+    participant J as ~/.claude/**/*.jsonl
 
     P->>R: send_message (WebSocket)
     R->>B: forward (SSE)
-    B->>C: MCP notification
-    C->>J: write response
-    J-->>R: file change detected
+    B->>C: Channel notification (stdio)
+    C->>J: write to transcript
+    J-->>R: file change detected (notify)
     R-->>P: jsonl_update (WebSocket)
-```
-
-## Tech Stack
-
-```mermaid
-graph LR
-    subgraph Backend
-        Rust["🦀 Rust<br/>Axum, Tokio"]
-        SQLite["🗄️ SQLite"]
-    end
-    subgraph Bridge
-        Bun["🥟 Bun<br/>TypeScript, MCP SDK"]
-    end
-    subgraph Frontend
-        React["⚛️ React 19"]
-        Vite["⚡ Vite"]
-        Tailwind["🎨 Tailwind CSS 4"]
-        Motion["🎬 Framer Motion"]
-    end
-
-    React --> Vite
-    React --> Tailwind
-    React --> Motion
-    Rust --> SQLite
 ```
 
 ## Environment Variables
@@ -435,56 +371,21 @@ alias claude='claude --dangerously-load-development-channels server:spire'
 3. 로그인 후 활성 세션 목록 확인
 4. PWA로 설치 (브라우저 메뉴 → "홈 화면에 추가")
 
-### 아키텍처
-
-```mermaid
-graph TB
-  subgraph Mac
-    subgraph Rust["Rust 서버 :3000"]
-      Auth["인증<br/>(SQLite)"]
-      Registry["세션<br/>레지스트리"]
-      Watcher["JSONL<br/>워처"]
-      WS["WebSocket<br/>허브"]
-      Router["브릿지<br/>라우터"]
-      Upload["파일<br/>업로드"]
-    end
-
-    Bridge0["브릿지 :8800"]
-    Bridge1["브릿지 :8801"]
-
-    CC0["Claude Code (0)"]
-    CC1["Claude Code (1)"]
-
-    Router -- "HTTP/SSE" --> Bridge0
-    Router -- "HTTP/SSE" --> Bridge1
-
-    Bridge0 -- "stdio" --> CC0
-    Bridge1 -- "stdio" --> CC1
-
-    CC0 -. "jsonl 기록" .-> Watcher
-    CC1 -. "jsonl 기록" .-> Watcher
-  end
-
-  Phone["📱 폰 (PWA)<br/>React + Vite"]
-  Phone -- "WebSocket" --> WS
-  Watcher -- "jsonl_update" --> WS
-```
-
 ### 데이터 흐름
 
 ```mermaid
 sequenceDiagram
-    participant P as 폰
+    participant P as 📱 폰
     participant R as Rust 서버
-    participant B as 브릿지
+    participant B as 브릿지 (MCP)
     participant C as Claude Code
-    participant J as JSONL 파일
+    participant J as ~/.claude/**/*.jsonl
 
     P->>R: 메시지 전송 (WebSocket)
     R->>B: 전달 (SSE)
-    B->>C: MCP 알림
-    C->>J: 응답 기록
-    J-->>R: 파일 변경 감지
+    B->>C: Channel 알림 (stdio)
+    C->>J: 트랜스크립트 기록
+    J-->>R: 파일 변경 감지 (notify)
     R-->>P: jsonl_update (WebSocket)
 ```
 
