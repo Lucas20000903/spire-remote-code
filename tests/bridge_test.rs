@@ -1,4 +1,4 @@
-use claude_code_remote::bridge::registry::BridgeRegistry;
+use spire::bridge::registry::BridgeRegistry;
 
 #[test]
 fn test_register_and_lookup() {

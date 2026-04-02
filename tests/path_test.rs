@@ -1,4 +1,4 @@
-use claude_code_remote::jsonl::parser::{project_dir_to_cwd, cwd_to_project_dir};
+use spire::jsonl::parser::{project_dir_to_cwd, cwd_to_project_dir};
 
 #[test]
 fn test_roundtrip_hyphenated_path() {

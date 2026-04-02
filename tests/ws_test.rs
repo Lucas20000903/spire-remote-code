@@ -1,4 +1,4 @@
-use claude_code_remote::ws::hub::WsHub;
+use spire::ws::hub::WsHub;
 
 #[tokio::test]
 async fn test_subscribe_and_broadcast() {

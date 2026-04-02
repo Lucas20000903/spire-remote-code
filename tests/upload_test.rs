@@ -1,4 +1,4 @@
-use claude_code_remote::upload::{ensure_temp_dir, sanitize_filename};
+use spire::upload::{ensure_temp_dir, sanitize_filename};
 use std::path::Path;
 
 #[test]

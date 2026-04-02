@@ -1,4 +1,4 @@
-use claude_code_remote::auth::jwt;
+use spire::auth::jwt;
 
 #[test]
 fn test_jwt_roundtrip() {

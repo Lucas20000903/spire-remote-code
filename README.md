@@ -44,7 +44,7 @@ cd bridge && bun install && cd ..
 ### 2. Run
 
 ```bash
-STATIC_DIR=web/dist ./target/release/claude-code-remote
+STATIC_DIR=web/dist ./target/release/spire
 ```
 
 Server starts at `http://0.0.0.0:3000`.
@@ -54,7 +54,7 @@ Server starts at `http://0.0.0.0:3000`.
 Register the Bridge as a global MCP server in Claude Code:
 
 ```bash
-claude mcp add -s user spire bun /path/to/claude-code-remote/bridge/bridge.ts
+claude mcp add -s user spire bun /path/to/spire/bridge/bridge.ts
 ```
 
 ### 4. Claude Code Launch Config
@@ -151,16 +151,16 @@ History is synced in real-time by watching `~/.claude/projects/*.jsonl`.
 
 ```bash
 # Run server
-claude-code-remote
+spire
 
 # Reset auth (forgot password)
-claude-code-remote reset-auth
+spire reset-auth
 ```
 
 ## Project Structure
 
 ```
-claude-code-remote/
+spire/
 ├── src/                     # Rust backend
 │   ├── main.rs              # Server entry, router
 │   ├── auth/                # JWT authentication
@@ -238,7 +238,7 @@ cd bridge && bun install && cd ..
 #### 2. 실행
 
 ```bash
-STATIC_DIR=web/dist ./target/release/claude-code-remote
+STATIC_DIR=web/dist ./target/release/spire
 ```
 
 서버가 `http://0.0.0.0:3000`에서 시작됩니다.
@@ -248,7 +248,7 @@ STATIC_DIR=web/dist ./target/release/claude-code-remote
 Claude Code에 Bridge를 글로벌 MCP 서버로 등록합니다:
 
 ```bash
-claude mcp add -s user spire bun /path/to/claude-code-remote/bridge/bridge.ts
+claude mcp add -s user spire bun /path/to/spire/bridge/bridge.ts
 ```
 
 #### 4. Claude Code 실행 설정

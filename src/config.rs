@@ -15,7 +15,7 @@ impl Default for AppConfig {
         let home = dirs::home_dir().expect("home dir");
         Self {
             port: 3000,
-            db_path: home.join(".claude-code-remote/data.db"),
+            db_path: home.join(".spire/data.db"),
             claude_projects_dir: home.join(".claude/projects"),
             bridge_port_min: 8800,
             bridge_port_max: 8899,

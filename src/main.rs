@@ -30,7 +30,7 @@ use ws::hub::WsHub;
 use bridge::registry::BridgeRegistry;
 
 #[derive(Parser)]
-#[command(name = "claude-web", about = "Claude Code Remote web server")]
+#[command(name = "spire", about = "Spire — Remote web UI for Claude Code")]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,

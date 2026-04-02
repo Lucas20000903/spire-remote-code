@@ -1,4 +1,4 @@
-use claude_code_remote::jsonl::parser::parse_entry;
+use spire::jsonl::parser::parse_entry;
 
 #[test]
 fn test_null_parent_uuid() {

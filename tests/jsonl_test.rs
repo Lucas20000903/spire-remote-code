@@ -1,4 +1,4 @@
-use claude_code_remote::jsonl::parser::{parse_entry, ContentBlock};
+use spire::jsonl::parser::{parse_entry, ContentBlock};
 
 #[test]
 fn test_parse_text_message() {
@@ -14,7 +14,7 @@ fn test_parse_assistant_with_blocks() {
     let entry = parse_entry(line).unwrap();
     let message = entry.message.expect("should have message");
     match &message.content {
-        claude_code_remote::jsonl::parser::Content::Blocks(blocks) => {
+        spire::jsonl::parser::Content::Blocks(blocks) => {
             assert_eq!(blocks.len(), 3);
             assert!(matches!(blocks[0], ContentBlock::Thinking { .. }));
             assert!(matches!(blocks[1], ContentBlock::Text { .. }));
@@ -43,7 +43,7 @@ fn test_parse_file_history_snapshot() {
 
 #[test]
 fn test_cwd_to_mangled_path() {
-    use claude_code_remote::jsonl::parser::cwd_to_project_dir;
+    use spire::jsonl::parser::cwd_to_project_dir;
     let result = cwd_to_project_dir("/Users/lucas/workspace/mango-renewal-fe");
     assert_eq!(result, "-Users-lucas-workspace-mango-renewal-fe");
 }
