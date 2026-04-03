@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "spire": {
+      "command": "npx",
+      "args": ["tsx", "${CLAUDE_PLUGIN_ROOT}/../bridge/bridge.ts"]
+    }
+  }
+}

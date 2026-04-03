@@ -96,3 +96,111 @@ React 19 + Vite + TailwindCSS 4 + shadcn/ui PWA.
 - shadcn/ui 컴포넌트는 `web/src/components/ui/`에 위치
 - 인증이 필요한 API 라우트는 `require_auth` 미들웨어 적용 (`protected` 라우터)
 - Bridge 내부 통신 라우트(`/api/bridges/*`)는 인증 없이 접근 (localhost만)
+
+## Debugging
+
+### 디버그 스크립트 (`scripts/debug/`)
+
+```bash
+# 전체 상태 진단 (tmux + Bridge + Hook + API 매칭)
+bash scripts/debug/session-debug.sh
+
+# Hook 이벤트 수동 테스트
+bash scripts/debug/hook-test.sh Stop my-session-id /path/to/cwd
+
+# 터미널 WebSocket 연결 테스트
+bash scripts/debug/terminal-test.sh claude_9F5A1348
+
+# 서버 로그 실시간 모니터
+bash scripts/debug/ws-monitor.sh hook
+
+# stale 세션/레코드 정리
+bash scripts/debug/cleanup.sh --all
+```
+
+### 디버그 API
+
+```bash
+# tmux 세션 목록 (command, cwd 포함)
+curl http://localhost:$PORT/api/tmux/sessions | python3 -m json.tool
+
+# 매칭 디버그 (descendant PIDs, Bridge PID 매칭 결과)
+curl http://localhost:$PORT/api/tmux/debug | python3 -m json.tool
+
+# Hook DB 상태
+sqlite3 ~/.spire/data.db "SELECT session_id, tmux_session, cwd, status, updated_at FROM hook_status;"
+
+# Bridge 레지스트리
+sqlite3 ~/.spire/data.db "SELECT id, pid, session_id, cwd, status FROM session ORDER BY last_active DESC;"
+
+# 서버 로그
+tail -f ~/.spire/stdout.log | grep -E "hook|session|terminal|error"
+```
+
+### 세션 매칭 소스 (우선순위)
+
+1. **Hook DB `tmux_session`** — `spire hook`이 `tmux display -p '#{session_name}'`으로 감지, 100% 정확
+2. **Active Bridge `session_id`** — MCP 연결 중일 때만 사용 가능
+3. **None** — Hook 미등록 + Bridge 미연결 세션은 채팅 불가, 터미널만 제공
+
+### LaunchAgent 환경 주의사항
+
+LaunchAgent(`~/.spire/plist`)에서 실행될 때 환경변수가 부족할 수 있음:
+- `HOME` — dirs 크레이트가 홈 디렉토리를 못 찾을 수 있음
+- `TMUX_TMPDIR` — tmux 소켓 경로 (`/private/tmp`) 필요
+- `PATH` — `/opt/homebrew/bin` 포함 필요
+- `TERM` — 터미널 PTY에 `xterm-256color` 필요
+- `LANG`/`LC_ALL` — 한글 지원에 `ko_KR.UTF-8` 필요
+
+### 흔한 문제
+
+| 증상 | 원인 | 해결 |
+|------|------|------|
+| tmux 세션 목록 비어있음 | LaunchAgent에서 `TMUX_TMPDIR` 미설정 | plist에 `TMUX_TMPDIR=/private/tmp` 추가 |
+| 같은 cwd 세션이 같은 채팅 보여줌 | Hook의 `tmux_session` 미매핑 | Hook 재등록 후 세션에서 아무 동작 수행 |
+| 터미널 "does not support clear" | PTY에 `TERM` 미설정 | `terminal.rs`의 `TERM=xterm-256color` 확인 |
+| Bridge 재연결 안 됨 | SSE 끊김 + heartbeat 미작동 | `bridge.ts`의 30초 re-register interval 확인 |
+| `spire-mobile-*` 세션 쌓임 | WebSocket 끊길 때 cleanup 실패 | `bash scripts/debug/cleanup.sh` 또는 서버 재시작 시 자동 정리 |
+
+## Session Architecture
+
+### 세션 식별 체계
+
+```
+tmux session (source of truth)
+  ├─ name: "claude_9F5A1348"
+  ├─ cwd: "/Users/lucas/workspace/project"
+  └─ pane_pid → process tree → claude process
+
+Claude Code session
+  ├─ session_id: "57aee9d4-..."  (JSONL 파일명)
+  └─ transcript: ~/.claude/projects/{mangled-cwd}/{session_id}.jsonl
+
+Hook DB (매핑 레이어)
+  └─ tmux_session ↔ session_id  (spire hook이 기록)
+
+Bridge (MCP 채널, 선택적)
+  └─ bridge_id ↔ session_id  (MCP 연결 시에만)
+```
+
+### Hook 기반 세션 상태
+
+```
+SessionStart       → "active"       (세션 시작/재개)
+UserPromptSubmit   → "in-progress"  (사용자 입력, prompt 저장)
+PreToolUse         → "tool-running" (도구 실행 중, tool_name 저장)
+Stop               → "idle"         (응답 완료, last_assistant_message 저장)
+StopFailure        → "error"        (API 에러, error_type 저장)
+SessionEnd         → "disconnected" (세션 종료)
+```
+
+### Plugin 구조 (`plugin/`)
+
+```
+plugin/
+├── .claude-plugin/plugin.json   ← 메타데이터
+├── .mcp.json                    ← Bridge MCP 서버 등록
+└── hooks/hooks.json             ← 6개 Hook (SessionStart~SessionEnd)
+```
+
+Hook은 `~/.claude/settings.json`에도 등록 가능 (현재 방식). 모든 Hook은 `spire hook` 서브커맨드를 호출하며, stdin JSON에 `tmux_session` 필드를 자동 주입한 뒤 서버에 POST.

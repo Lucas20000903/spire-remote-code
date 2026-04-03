@@ -604,6 +604,67 @@ fn kill_proc(pid: u32) {
     }
 }
 
+/// `spire hook` — stdin에서 hook JSON을 읽고 Rust 서버에 POST
+pub fn handle_hook() {
+    let input = {
+        let mut buf = String::new();
+        if io::stdin().read_line(&mut buf).is_err() || buf.trim().is_empty() {
+            // stdin에서 한 줄만 읽으면 안 되고 전체를 읽어야 함
+            buf.clear();
+        }
+        // 전체 stdin 읽기
+        if buf.is_empty() {
+            let mut full = String::new();
+            io::Read::read_to_string(&mut io::stdin(), &mut full).ok();
+            full
+        } else {
+            // 첫 줄 이후 나머지도 읽기
+            let mut rest = String::new();
+            io::Read::read_to_string(&mut io::stdin(), &mut rest).ok();
+            format!("{}{}", buf, rest)
+        }
+    };
+
+    let input = input.trim();
+    if input.is_empty() {
+        return;
+    }
+
+    // JSON 파싱 + tmux 세션 이름 주입
+    let mut json: serde_json::Value = match serde_json::from_str(input) {
+        Ok(v) => v,
+        Err(_) => return,
+    };
+
+    // 현재 tmux 세션 이름 감지 (Hook은 Claude 내부에서 실행되므로 정확)
+    if let Ok(output) = std::process::Command::new("tmux")
+        .args(["display", "-p", "#{session_name}"])
+        .output()
+    {
+        if output.status.success() {
+            let name = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !name.is_empty() {
+                json["tmux_session"] = serde_json::Value::String(name);
+            }
+        }
+    }
+
+    let prefs = load_prefs();
+    let url = format!("http://localhost:{}/api/hooks/event", prefs.port);
+
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(3))
+        .build();
+
+    if let Ok(client) = client {
+        let _ = client
+            .post(&url)
+            .header("Content-Type", "application/json")
+            .body(json.to_string())
+            .send();
+    }
+}
+
 fn find_bridge_path() -> Option<String> {
     // Check installed location (~/.spire/bridge/bridge.ts)
     if let Some(home) = dirs::home_dir() {

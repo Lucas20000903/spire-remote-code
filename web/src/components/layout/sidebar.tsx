@@ -4,7 +4,7 @@ import { motion } from 'motion/react'
 import { useSessions } from '@/hooks/use-sessions'
 import { useWebSocket } from '@/hooks/use-websocket'
 import { fetchFavorites } from '@/lib/api'
-import { Plus, Star, Loader2, Settings, LogOut } from 'lucide-react'
+import { Plus, Star, Loader2, Settings, LogOut, Bot, TerminalSquare } from 'lucide-react'
 import { SettingsDialog } from '@/components/settings/settings-dialog'
 import type { SessionInfo, SessionStatus } from '@/lib/types'
 
@@ -34,6 +34,10 @@ function StatusIndicator({ status }: { status?: SessionStatus }) {
       )
     case 'in-progress':
       return <Loader2 className="h-3 w-3 shrink-0 animate-spin text-green-500" />
+    case 'tool-running':
+      return <Loader2 className="h-3 w-3 shrink-0 animate-spin text-blue-500" />
+    case 'error':
+      return <span className="inline-flex h-2 w-2 shrink-0 rounded-full bg-red-500" />
     case 'pending':
       return <span className="inline-flex h-2 w-2 shrink-0 rounded-full bg-muted-foreground/30" />
     default: // idle
@@ -167,6 +171,11 @@ export function SidebarContent({ onSelect }: SidebarContentProps) {
                 >
                   <div className="flex items-center gap-2">
                     <StatusIndicator status={s.status} />
+                    {s.command === 'claude' ? (
+                      <Bot className="h-3 w-3 shrink-0 text-violet-400" />
+                    ) : s.command ? (
+                      <TerminalSquare className="h-3 w-3 shrink-0 text-zinc-500" />
+                    ) : null}
                     <span className={`truncate text-sm ${isPending ? 'animate-pulse text-muted-foreground' : ''}`}>
                       {s.lastUserMessage || 'New Session'}
                     </span>

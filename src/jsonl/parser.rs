@@ -102,6 +102,7 @@ pub fn parse_entry(line: &str) -> anyhow::Result<TranscriptEntry> {
     Ok(entry)
 }
 
+#[allow(dead_code)]
 pub fn cwd_to_project_dir(cwd: &str) -> String {
     format!("-{}", cwd.trim_start_matches('/').replace('/', "-"))
 }

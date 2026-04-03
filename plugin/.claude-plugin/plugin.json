@@ -1,0 +1,6 @@
+{
+  "name": "spire",
+  "description": "Remote web UI for Claude Code — monitor sessions and send messages from your phone",
+  "version": "0.1.0",
+  "keywords": ["spire", "remote", "channel", "mobile", "monitoring", "hooks"]
+}

@@ -8,6 +8,7 @@ mod jsonl;
 mod push;
 mod session;
 mod state;
+mod terminal;
 mod upload;
 mod ws;
 
@@ -61,6 +62,8 @@ enum Commands {
     Rebuild,
     /// Start development server (cargo-watch + Vite HMR)
     Dev,
+    /// Forward hook event from Claude Code to Spire server (stdin → POST)
+    Hook,
 }
 
 impl FromRef<AppState> for DbPool {
@@ -101,6 +104,89 @@ async fn ws_handler(
 
     let state = Arc::new(state);
     Ok(ws_upgrade.on_upgrade(move |socket| ws::handler::handle_ws(socket, state)))
+}
+
+/// Hook 이벤트에서 세션 상태를 매핑
+fn hook_event_to_status(event: &str) -> &'static str {
+    match event {
+        "SessionStart" => "active",
+        "UserPromptSubmit" => "in-progress",
+        "PreToolUse" => "tool-running",
+        "Stop" => "idle",
+        "StopFailure" => "error",
+        "SessionEnd" => "disconnected",
+        _ => "unknown",
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct HookEvent {
+    session_id: Option<String>,
+    hook_event_name: Option<String>,
+    cwd: Option<String>,
+    tool_name: Option<String>,
+    prompt: Option<String>,
+    last_assistant_message: Option<String>,
+    tmux_session: Option<String>,
+    #[serde(default)]
+    error: Option<String>,
+}
+
+async fn handle_hook_event(
+    State(state): State<AppState>,
+    axum::Json(event): axum::Json<HookEvent>,
+) -> impl IntoResponse {
+    let event_name = event.hook_event_name.as_deref().unwrap_or("unknown");
+    let status = hook_event_to_status(event_name);
+    let session_id = event.session_id.as_deref().unwrap_or("");
+
+    tracing::info!(
+        "hook: {} → status={}, session={}",
+        event_name, status, session_id
+    );
+
+    // DB에 세션 상태 저장
+    if !session_id.is_empty() {
+        let now = chrono::Utc::now().to_rfc3339();
+        let tool = event.tool_name.as_deref().unwrap_or("");
+        let prompt = event.prompt.as_deref().unwrap_or("");
+        let last_msg = event.last_assistant_message.as_deref().unwrap_or("");
+        let error_msg = event.error.as_deref().unwrap_or("");
+        let cwd = event.cwd.as_deref().unwrap_or("");
+        let tmux = event.tmux_session.as_deref().unwrap_or("");
+
+        let db = state.db.lock().unwrap();
+        let _ = db.execute(
+            "INSERT INTO hook_status (session_id, status, tool_name, last_prompt, last_response, error, cwd, tmux_session, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+             ON CONFLICT(session_id) DO UPDATE SET
+               status = ?2,
+               tool_name = CASE WHEN ?3 = '' THEN hook_status.tool_name ELSE ?3 END,
+               last_prompt = CASE WHEN ?4 = '' THEN hook_status.last_prompt ELSE ?4 END,
+               last_response = CASE WHEN ?5 = '' THEN hook_status.last_response ELSE ?5 END,
+               error = CASE WHEN ?6 = '' THEN hook_status.error ELSE ?6 END,
+               cwd = CASE WHEN ?7 = '' THEN hook_status.cwd ELSE ?7 END,
+               tmux_session = CASE WHEN ?8 = '' THEN hook_status.tmux_session ELSE ?8 END,
+               updated_at = ?9",
+            rusqlite::params![session_id, status, tool, prompt, last_msg, error_msg, cwd, tmux, now],
+        );
+    }
+
+    // WebSocket 브로드캐스트
+    let ws_msg = serde_json::json!({
+        "type": "hook_status",
+        "session_id": session_id,
+        "status": status,
+        "event": event_name,
+        "tool_name": event.tool_name,
+        "cwd": event.cwd,
+    });
+    state
+        .ws_hub
+        .broadcast_all(serde_json::to_string(&ws_msg).unwrap())
+        .await;
+
+    axum::Json(serde_json::json!({ "ok": true }))
 }
 
 #[tokio::main]
@@ -150,6 +236,10 @@ async fn main() {
             cli::dev_server();
             return;
         }
+        Some(Commands::Hook) => {
+            cli::handle_hook();
+            return;
+        }
         None => {}
     }
 
@@ -168,6 +258,9 @@ async fn main() {
     let ws_hub = WsHub::new();
 
     let port = config.port;
+
+    // 서버 시작 시 stale mobile tmux 세션 정리
+    terminal::cleanup_stale_mobile_sessions().await;
 
     // JSONL watcher: watch for transcript changes and broadcast to WS clients
     let (jsonl_watcher, mut jsonl_rx) = jsonl::watcher::JsonlWatcher::new();
@@ -375,6 +468,12 @@ async fn main() {
             "/api/bridges/permission_request",
             post(bridge::routes::permission_request),
         )
+        // Hook 이벤트 (Claude Code → spire hook → 이 엔드포인트)
+        .route("/api/hooks/event", post(handle_hook_event))
+        // 터미널: tmux 세션 목록 + WebSocket PTY
+        .route("/api/tmux/sessions", get(terminal::tmux_sessions_handler))
+        .route("/api/tmux/debug", get(terminal::tmux_debug_handler))
+        .route("/ws/terminal", get(terminal::terminal_ws))
         .merge(protected)
         .layer(cors)
         .with_state(state);

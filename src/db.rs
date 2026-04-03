@@ -46,8 +46,25 @@ pub fn init_db(path: &Path) -> anyhow::Result<DbPool> {
         );
         CREATE INDEX IF NOT EXISTS idx_session_cwd ON session(cwd);
         CREATE INDEX IF NOT EXISTS idx_session_pid ON session(pid);
+        CREATE TABLE IF NOT EXISTS hook_status (
+            session_id TEXT PRIMARY KEY,
+            status TEXT NOT NULL DEFAULT 'unknown',
+            tool_name TEXT NOT NULL DEFAULT '',
+            last_prompt TEXT NOT NULL DEFAULT '',
+            last_response TEXT NOT NULL DEFAULT '',
+            error TEXT NOT NULL DEFAULT '',
+            cwd TEXT NOT NULL DEFAULT '',
+            tmux_session TEXT NOT NULL DEFAULT '',
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
     ",
     )?;
+    // 마이그레이션: hook_status에 tmux_session 컬럼 추가 (없으면)
+    let _ = conn.execute(
+        "ALTER TABLE hook_status ADD COLUMN tmux_session TEXT NOT NULL DEFAULT ''",
+        [],
+    );
+
     Ok(Arc::new(Mutex::new(conn)))
 }
 

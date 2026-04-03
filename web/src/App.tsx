@@ -7,6 +7,7 @@ import { LoginForm } from '@/components/auth/login-form'
 import { AppLayout } from '@/components/layout/app-layout'
 import { ChatView } from '@/components/chat/chat-view'
 import { ChatIntro } from '@/components/chat/chat-intro'
+// TerminalPage는 이제 ChatView 내부에서 viewMode로 전환
 
 function AuthenticatedApp() {
   return (

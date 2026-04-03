@@ -136,6 +136,10 @@ function interruptedDescription(prev?: TranscriptEntry): string {
 }
 
 export function MessageItem({ entry, toolResultMap, nextTimestamp, isHistorical, prevEntry }: MessageItemProps) {
+  const handleDebugToggle = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    debugSelection.toggle(entry, e.target.checked)
+  }, [entry])
+
   if (!entry.message) return null
   const { content } = entry.message
 
@@ -188,15 +192,17 @@ export function MessageItem({ entry, toolResultMap, nextTimestamp, isHistorical,
   const isUser = isActualUserMessage(entry)
 
   let thinkingDurationMs: number | undefined
-  if (isThinkingOnly(entry) && nextTimestamp) {
-    const start = new Date(entry.timestamp).getTime()
-    const end = new Date(nextTimestamp).getTime()
-    if (end > start) thinkingDurationMs = end - start
+  if (isThinkingOnly(entry)) {
+    if (nextTimestamp) {
+      const start = new Date(entry.timestamp).getTime()
+      const end = new Date(nextTimestamp).getTime()
+      if (end > start) thinkingDurationMs = end - start
+    }
+    // nextTimestamp 없어도 마지막 엔트리가 아니면 완료 처리
+    if (thinkingDurationMs == null && isHistorical) {
+      thinkingDurationMs = 0
+    }
   }
-
-  const handleDebugToggle = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    debugSelection.toggle(entry, e.target.checked)
-  }, [entry])
 
   const blocks = typeof displayContent === 'string' ? (
     <TextBlock text={displayContent} />

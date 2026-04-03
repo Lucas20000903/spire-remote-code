@@ -21,14 +21,19 @@ export type WsServerMessage =
   | { type: 'history'; session_id: string; messages: TranscriptEntry[] }
   | { type: 'error'; message: string }
   | { type: 'permission_request'; bridge_id: string; request_id: string; tool_name: string; description: string; input_preview: string }
+  | { type: 'hook_status'; session_id: string; status: HookSessionStatus; event: string; tool_name?: string; cwd?: string }
 
-export type SessionStatus = 'idle' | 'in-progress' | 'completed' | 'pending'
+export type HookSessionStatus = 'active' | 'in-progress' | 'tool-running' | 'idle' | 'error' | 'disconnected'
+export type SessionStatus = 'idle' | 'in-progress' | 'completed' | 'pending' | 'tool-running' | 'error'
 
 export interface SessionInfo {
   id: string | null
   cwd: string
   port: number
   bridge_id: string
+  tmux_session?: string
+  command?: string
+  has_bridge?: boolean
   lastUserMessage?: string
   status?: SessionStatus
 }
@@ -164,3 +169,88 @@ export type ContentBlock =
   | { type: 'tool_use'; id: string; name: string; input: Record<string, unknown> }
   | { type: 'tool_result'; tool_use_id: string; content?: unknown; is_error?: boolean }
   | { type: 'image'; source: { type: 'base64'; media_type: string; data: string } }
+
+/** Task 체크리스트 아이템 */
+export interface TaskItem {
+  id: number
+  subject: string
+  description: string
+  status: 'open' | 'in_progress' | 'completed'
+}
+
+/** tool_result 텍스트에서 Task 번호 파싱 ("Task #N created successfully: ...") */
+function parseTaskIdFromResult(content: unknown): number | null {
+  const text = typeof content === 'string'
+    ? content
+    : Array.isArray(content)
+      ? content.map((c: { type?: string; text?: string }) => c.type === 'text' ? c.text : '').join('')
+      : content != null ? String(content) : ''
+  const match = text.match(/Task #(\d+)/)
+  return match ? Number(match[1]) : null
+}
+
+/** 메시지 목록에서 TaskCreate/TaskUpdate tool_use를 수집하여 task 목록 반환 */
+export function extractTasks(messages: TranscriptEntry[]): TaskItem[] {
+  const resultMap = buildToolResultMap(messages)
+  const tasks = new Map<number, TaskItem>()
+  let autoId = 0
+
+  for (const entry of messages) {
+    if (!entry.message || typeof entry.message.content === 'string') continue
+    for (const block of entry.message.content) {
+      if (block.type !== 'tool_use') continue
+
+      if (block.name === 'TodoWrite' || block.name === 'TaskCreate') {
+        const input = block.input as Record<string, unknown>
+
+        if (block.name === 'TodoWrite' && Array.isArray(input.todos)) {
+          // TodoWrite: 전체 task 목록을 한 번에 덮어쓰기
+          tasks.clear()
+          for (const todo of input.todos as Array<{ id?: string | number; content?: string; status?: string }>) {
+            const id = typeof todo.id === 'number' ? todo.id : (typeof todo.id === 'string' ? Number(todo.id) : ++autoId)
+            const status = todo.status === 'completed' ? 'completed'
+              : todo.status === 'in_progress' ? 'in_progress'
+              : 'open'
+            tasks.set(id, {
+              id,
+              subject: typeof todo.content === 'string' ? todo.content : '',
+              description: '',
+              status,
+            })
+          }
+          continue
+        }
+
+        // TaskCreate
+        const subject = typeof input.subject === 'string' ? input.subject : ''
+        const description = typeof input.description === 'string' ? input.description : ''
+        const status = input.status === 'completed' ? 'completed'
+          : input.status === 'in_progress' ? 'in_progress'
+          : 'open'
+
+        // tool_result에서 id 추출, 없으면 자동 증가
+        const result = resultMap.get(block.id)
+        const parsedId = result ? parseTaskIdFromResult(result.content) : null
+        const taskId = parsedId ?? ++autoId
+        tasks.set(taskId, { id: taskId, subject, description, status })
+      }
+
+      if (block.name === 'TaskUpdate') {
+        const input = block.input as Record<string, unknown>
+        const rawId = input.taskId ?? input.id
+        const taskId = typeof rawId === 'number' ? rawId : Number(rawId)
+        if (isNaN(taskId)) continue
+        const existing = tasks.get(taskId)
+        if (!existing) continue
+        const status = typeof input.status === 'string'
+          ? (input.status === 'completed' ? 'completed'
+            : input.status === 'in_progress' ? 'in_progress'
+            : 'open')
+          : existing.status
+        tasks.set(taskId, { ...existing, status })
+      }
+    }
+  }
+
+  return Array.from(tasks.values())
+}

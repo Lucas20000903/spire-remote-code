@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useState, useCallback, useRef, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useWebSocket } from './use-websocket'
-import type { SessionInfo, SessionStatus, WsServerMessage } from '@/lib/types'
+import type { SessionInfo, SessionStatus, HookSessionStatus, WsServerMessage } from '@/lib/types'
 import { extractChannelContent, isSystemMessage, deriveSessionStatus } from '@/lib/types'
 import { showNotification } from '@/lib/notifications'
 import { useSettings } from './use-settings'
@@ -15,6 +15,25 @@ interface SessionsContextValue {
   markSeen: (bridgeId: string) => void
 }
 
+/** Hook 서버 상태 → UI 세션 상태 변환 */
+function hookToSessionStatus(hook: HookSessionStatus): SessionStatus {
+  switch (hook) {
+    case 'in-progress':
+    case 'tool-running':
+      return hook as SessionStatus
+    case 'idle':
+      return 'completed'
+    case 'error':
+      return 'error'
+    case 'active':
+      return 'idle'
+    case 'disconnected':
+      return 'idle'
+    default:
+      return 'idle'
+  }
+}
+
 const SessionsContext = createContext<SessionsContextValue | null>(null)
 
 export function SessionsProvider({ children }: { children: ReactNode }) {
@@ -23,7 +42,7 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
   const { settings } = useSettings()
   const [active, setActive] = useState<SessionInfo[]>([])
   const [recent, setRecent] = useState<SessionInfo[]>([])
-  const pendingRef = useRef<Set<string>>(new Set())
+  const seenRef = useRef<Set<string>>(new Set())
   const prevStatusRef = useRef<Map<string, SessionStatus>>(new Map())
   const settingsRef = useRef(settings)
   settingsRef.current = settings
@@ -44,38 +63,41 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
     return onMessage((msg: WsServerMessage) => {
       if (msg.type === 'sessions') {
         setActive((prev) => {
-          const pendingSessions = prev.filter((s) => pendingRef.current.has(s.bridge_id))
-          // 기존 status 보존
           const prevMap = new Map(prev.map((s) => [s.bridge_id, s]))
           const merged = msg.active.map((s) => {
             const existing = prevMap.get(s.bridge_id)
-            // 서버 status > 기존 프론트 status > idle
-            return { ...s, status: (s.status || existing?.status || 'idle') as SessionStatus }
+            let status = (s.status || existing?.status || 'idle') as SessionStatus
+            if (status === 'completed' && seenRef.current.has(s.bridge_id)) {
+              status = 'idle'
+            }
+            return { ...s, status }
           })
-          return [...merged, ...pendingSessions]
+
+          // pending 세션 생성 후 목록에 나타나면 자동 이동
+          if (pendingCwdRef.current) {
+            const newSession = merged.find((s) =>
+              s.cwd === pendingCwdRef.current && !prevMap.has(s.bridge_id)
+            )
+            if (newSession) {
+              pendingCwdRef.current = null
+              navigate(`/chat/${newSession.bridge_id}`)
+            }
+          }
+
+          return merged
         })
         setRecent(msg.recent)
       } else if (msg.type === 'session_registered') {
-        setActive((prev) => {
-          const pendingIdx = prev.findIndex(
-            (s) => pendingRef.current.has(s.bridge_id) && s.cwd === msg.session.cwd
-          )
-          if (pendingIdx >= 0) {
-            const tempId = prev[pendingIdx].bridge_id
-            pendingRef.current.delete(tempId)
-            navigate(`/chat/${msg.session.bridge_id}`, { replace: true })
-            return [
-              ...prev.filter((s) => s.bridge_id !== tempId && s.bridge_id !== msg.session.bridge_id),
-              { ...msg.session, status: 'idle' as SessionStatus },
-            ]
-          }
-          return [
-            ...prev.filter((s) => s.bridge_id !== msg.session.bridge_id),
-            { ...msg.session, status: 'idle' as SessionStatus },
-          ]
-        })
+        // 서버에서 정확한 목록 다시 받기
+        send({ type: 'list_sessions' })
       } else if (msg.type === 'session_unregistered') {
-        setActive((prev) => prev.filter((s) => s.bridge_id !== msg.bridge_id))
+        // Bridge 끊김 → has_bridge false + 재요청으로 tmux 기반 목록 갱신
+        setActive((prev) => prev.map((s) =>
+          s.bridge_id === msg.bridge_id
+            ? { ...s, has_bridge: false }
+            : s
+        ))
+        send({ type: 'list_sessions' })
       } else if (msg.type === 'session_updated') {
         setActive((prev) => prev.map((s) => s.bridge_id === msg.bridge_id ? { ...s, id: msg.session_id } : s))
       } else if (msg.type === 'jsonl_update') {
@@ -123,10 +145,38 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
           }
         }
 
-        // 상태 기록
+        // 상태 기록 + 새 활동 시 seen 리셋
         if (newStatus && bid) {
           prevStatusRef.current.set(bid, newStatus)
+          if (newStatus === 'in-progress') seenRef.current.delete(bid)
         }
+      } else if (msg.type === 'hook_status') {
+        // Hook 기반 상태: session_id로 세션 찾아서 업데이트
+        const hookStatus = hookToSessionStatus(msg.status)
+        const sid = msg.session_id
+
+        setActive((prev) => {
+          const target = prev.find((s) => s.id === sid)
+          if (!target) return prev
+
+          const bid = target.bridge_id
+          const prevStatus = prevStatusRef.current.get(bid)
+
+          // completed 전환 감지 → 알림
+          if (hookStatus === 'completed' && prevStatus && prevStatus !== 'completed' && settingsRef.current.notificationsEnabled) {
+            const project = target.cwd.split('/').pop() || 'Session'
+            showNotification(`${project} - Task completed`, target.lastUserMessage || undefined)
+          }
+
+          if (hookStatus) {
+            prevStatusRef.current.set(bid, hookStatus)
+            if (hookStatus === 'in-progress' || hookStatus === 'tool-running') seenRef.current.delete(bid)
+          }
+
+          return prev.map((s) =>
+            s.id === sid ? { ...s, status: hookStatus } : s
+          )
+        })
       }
     })
 
@@ -135,22 +185,14 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
     }
   }, [status, send, onMessage, navigate])
 
+  const pendingCwdRef = useRef<string | null>(null)
+
   const createSession = useCallback(
     (cwd: string) => {
-      const tempBridgeId = `pending-${Date.now()}`
-      const tempSession: SessionInfo = {
-        id: null,
-        cwd,
-        port: 0,
-        bridge_id: tempBridgeId,
-        status: 'pending',
-      }
-      pendingRef.current.add(tempBridgeId)
-      setActive((prev) => [...prev, tempSession])
-      navigate(`/chat/${tempBridgeId}`)
+      pendingCwdRef.current = cwd
       send({ type: 'create_session', cwd })
     },
-    [send, navigate],
+    [send],
   )
 
   const findByBridgeId = useCallback(
@@ -160,12 +202,20 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
 
   // completed 세션을 idle로 전환 (세션 진입 시 호출)
   const markSeen = useCallback((bridgeId: string) => {
-    setActive((prev) => prev.map((s) =>
-      s.bridge_id === bridgeId && s.status === 'completed'
-        ? { ...s, status: 'idle' as SessionStatus }
-        : s
-    ))
-  }, [])
+    seenRef.current.add(bridgeId)
+    setActive((prev) => {
+      const session = prev.find((s) => s.bridge_id === bridgeId)
+      // 서버에 seen 알림 (session_id가 있으면)
+      if (session?.id && session.status === 'completed') {
+        send({ type: 'mark_seen', session_id: session.id } as any)
+      }
+      return prev.map((s) =>
+        s.bridge_id === bridgeId && s.status === 'completed'
+          ? { ...s, status: 'idle' as SessionStatus }
+          : s
+      )
+    })
+  }, [send])
 
   const completedCount = active.filter((s) => s.status === 'completed').length
 

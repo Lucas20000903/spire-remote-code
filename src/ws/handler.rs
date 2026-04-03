@@ -3,6 +3,7 @@ use futures::{SinkExt, StreamExt};
 use std::sync::Arc;
 
 use crate::state::AppState;
+use crate::terminal;
 
 pub async fn handle_ws(ws: WebSocket, state: Arc<AppState>) {
     state.ws_client_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -77,6 +78,16 @@ pub async fn handle_ws(ws: WebSocket, state: Arc<AppState>) {
                     Some("permission_response") => {
                         handle_permission_response(&state, &parsed).await;
                     }
+                    Some("mark_seen") => {
+                        // Hook DB의 status를 seen으로 변경 (completed → idle)
+                        if let Some(sid) = parsed["session_id"].as_str() {
+                            let db = state.db.lock().unwrap();
+                            let _ = db.execute(
+                                "UPDATE hook_status SET status = 'seen' WHERE session_id = ?1 AND status = 'idle'",
+                                [sid],
+                            );
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -121,9 +132,90 @@ async fn handle_list_sessions(
     state: &AppState,
     tx: &tokio::sync::mpsc::Sender<String>,
 ) {
-    let bridges = state.registry.list_active();
+    let active_bridges = state.registry.list_active();
+    let tmux_sessions = terminal::list_tmux_sessions().await;
+
+    // Hook DB: tmux_session → (session_id, status, last_prompt) 매핑
+    let hook_map: std::collections::HashMap<String, (String, String, String)> = {
+        let db = state.db.lock().unwrap();
+        let mut stmt = db.prepare(
+            "SELECT tmux_session, session_id, status, last_prompt FROM hook_status WHERE tmux_session != ''"
+        ).unwrap();
+        stmt.query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                (r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, String>(3)?),
+            ))
+        }).unwrap().filter_map(|r| r.ok()).collect()
+    };
+
     let mut active = Vec::new();
-    for b in &bridges {
+    let mut used_bridge_ids = std::collections::HashSet::new();
+
+    for ts in &tmux_sessions {
+        // 1. Hook DB에서 tmux_session 이름으로 정확히 매칭 (가장 신뢰)
+        let hook = hook_map.get(&ts.name);
+        let hook_session_id = hook.map(|(sid, _, _)| sid.clone());
+
+        // 2. Active Bridge 매칭: session_id로만 (cwd fallback 제거 — 같은 cwd에 여러 세션 있으면 잘못 매칭됨)
+        let bridge = if let Some(ref hsid) = hook_session_id {
+            active_bridges.iter().find(|b| {
+                !used_bridge_ids.contains(&b.id) && b.session_id.as_deref() == Some(hsid.as_str())
+            })
+        } else {
+            None
+        };
+
+        // bridge_id는 항상 tmux 기반 (URL 안정성)
+        let bridge_id = format!("tmux:{}", ts.name);
+        let (port, has_bridge) = if let Some(b) = bridge {
+            used_bridge_ids.insert(b.id.clone());
+            (b.port, true)
+        } else {
+            (0, false)
+        };
+
+        // session_id: Hook > Bridge > None
+        let session_id = hook_session_id
+            .or_else(|| bridge.and_then(|b| b.session_id.clone()));
+
+        // Hook DB status를 우선 사용 (정확), fallback으로 JSONL 파싱
+        let hook_db_status = hook.map(|(_, st, _)| st.as_str()).and_then(|st| match st {
+            "idle" => Some("completed"),
+            "seen" => Some("idle"),  // 유저가 확인한 세션
+            "in-progress" | "tool-running" | "error" | "active" => Some(st),
+            "disconnected" => None,
+            _ => None,
+        });
+
+        let (last_msg, jsonl_status) = if let Some(ref sid) = session_id {
+            let msg = get_last_user_message(&state.config.claude_projects_dir, sid).await;
+            let st = get_session_status(&state.config.claude_projects_dir, sid).await;
+            (msg, st)
+        } else {
+            (None, None)
+        };
+
+        let status = hook_db_status
+            .map(String::from)
+            .or(jsonl_status);
+
+        active.push(serde_json::json!({
+            "id": session_id,
+            "cwd": ts.cwd,
+            "port": port,
+            "bridge_id": bridge_id,
+            "tmux_session": ts.name,
+            "command": &ts.command,
+            "has_bridge": has_bridge,
+            "lastUserMessage": last_msg,
+            "status": status,
+        }));
+    }
+
+    // tmux에 매칭 안 된 Bridge 세션 (tmux 없이 실행 중인 경우)
+    for b in &active_bridges {
+        if used_bridge_ids.contains(&b.id) { continue; }
         let (last_msg, status) = if let Some(ref sid) = b.session_id {
             let msg = get_last_user_message(&state.config.claude_projects_dir, sid).await;
             let st = get_session_status(&state.config.claude_projects_dir, sid).await;
@@ -136,10 +228,12 @@ async fn handle_list_sessions(
             "cwd": b.cwd,
             "port": b.port,
             "bridge_id": b.id,
+            "has_bridge": true,
             "lastUserMessage": last_msg,
             "status": status,
         }));
     }
+
     let msg = serde_json::json!({
         "type": "sessions",
         "active": active,
@@ -246,6 +340,7 @@ async fn get_session_status(projects_dir: &std::path::Path, session_id: &str) ->
     }
     None
 }
+
 
 async fn handle_load_history(
     state: &AppState,

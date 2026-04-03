@@ -71,12 +71,26 @@ async function updateSession(sessionId: string) {
 async function connectSSE(port: number, mcp: Server) {
   let retryDelay = 1000
 
+  // 30초마다 재등록 (서버 재시작 시 자동 복구)
+  setInterval(async () => {
+    try {
+      bridgeId = await register(port)
+    } catch {}
+  }, 30_000)
+
   while (true) {
     try {
       // 서버 재시작 시 registry가 초기화되므로 매번 재등록
       bridgeId = await register(port)
       const url = `${RUST_SERVER}/api/bridges/stream?bridge_id=${bridgeId}`
-      const res = await fetch(url)
+      const controller = new AbortController()
+      // 60초 동안 SSE 이벤트가 없으면 재연결 (서버 keepalive 감지)
+      let lastActivity = Date.now()
+      const watchdog = setInterval(() => {
+        if (Date.now() - lastActivity > 60_000) controller.abort()
+      }, 10_000)
+
+      const res = await fetch(url, { signal: controller.signal })
       if (!res.ok || !res.body) throw new Error(`SSE failed: ${res.status}`)
       retryDelay = 1000
 
@@ -84,24 +98,29 @@ async function connectSSE(port: number, mcp: Server) {
       const decoder = new TextDecoder()
       let buffer = ''
 
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        buffer += decoder.decode(value, { stream: true })
+      try {
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          lastActivity = Date.now()
+          buffer += decoder.decode(value, { stream: true })
 
-        const lines = buffer.split('\n')
-        buffer = lines.pop() || ''
+          const lines = buffer.split('\n')
+          buffer = lines.pop() || ''
 
-        let eventType = 'message'
-        for (const line of lines) {
-          if (line.startsWith('event: ')) {
-            eventType = line.slice(7).trim()
-          } else if (line.startsWith('data: ')) {
-            const data = JSON.parse(line.slice(6))
-            await handleSSEEvent(eventType, data, mcp)
-            eventType = 'message'
+          let eventType = 'message'
+          for (const line of lines) {
+            if (line.startsWith('event: ')) {
+              eventType = line.slice(7).trim()
+            } else if (line.startsWith('data: ')) {
+              const data = JSON.parse(line.slice(6))
+              await handleSSEEvent(eventType, data, mcp)
+              eventType = 'message'
+            }
           }
         }
+      } finally {
+        clearInterval(watchdog)
       }
     } catch (err) {
       console.error(`SSE error, retry in ${retryDelay}ms:`, err)

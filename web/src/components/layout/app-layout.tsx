@@ -5,7 +5,8 @@ import { motion, AnimatePresence } from 'motion/react'
 import { SidebarContent } from './sidebar'
 import { ConnectionBanner } from './connection-banner'
 import { useSessions } from '@/hooks/use-sessions'
-import { Menu, Monitor } from 'lucide-react'
+import { Menu, Monitor, TerminalSquare } from 'lucide-react'
+import { useLocation } from 'react-router-dom'
 import { WebViewPanel } from '@/components/webview/webview-panel'
 
 interface HeaderTitle {
@@ -13,11 +14,23 @@ interface HeaderTitle {
   subtitle?: string
 }
 
+export type ViewMode = 'chat' | 'terminal'
+
 interface LayoutContextValue {
   setTitle: (title: HeaderTitle | null) => void
+  viewMode: ViewMode
+  setViewMode: (mode: ViewMode) => void
+  tmuxSession: string | null
+  setTmuxSession: (name: string | null) => void
 }
 
-const LayoutContext = createContext<LayoutContextValue>({ setTitle: () => {} })
+const LayoutContext = createContext<LayoutContextValue>({
+  setTitle: () => {},
+  viewMode: 'chat',
+  setViewMode: () => {},
+  tmuxSession: null,
+  setTmuxSession: () => {},
+})
 
 export function useLayout() {
   return useContext(LayoutContext)
@@ -49,10 +62,40 @@ function CompletedBadge() {
 
 export function AppLayout() {
   const isDesktop = useIsDesktop()
+  const location = useLocation()
+  const { findByBridgeId } = useSessions()
+  // URL에서 bridgeId 추출 (/chat/:bridgeId)
+  const bridgeId = location.pathname.match(/^\/chat\/(.+)/)?.[1]
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
   const [desktopSidebarOpen, setDesktopSidebarOpen] = useState(true)
   const [title, setTitle] = useState<HeaderTitle | null>(null)
   const [webviewOpen, setWebviewOpen] = useState(false)
+  const [viewMode, setViewMode] = useState<ViewMode>('chat')
+  const [tmuxSession, setTmuxSession] = useState<string | null>(null)
+
+  const toggleTerminal = () => {
+    if (viewMode === 'terminal') {
+      setViewMode('chat')
+    } else {
+      // tmuxSession이 이미 있으면 바로 전환
+      if (tmuxSession) {
+        setViewMode('terminal')
+        return
+      }
+      // 없으면 현재 세션의 tmux_session 사용
+      const currentSession = bridgeId ? findByBridgeId(bridgeId) : null
+      if (currentSession?.tmux_session) {
+        setTmuxSession(currentSession.tmux_session)
+        setViewMode('terminal')
+      }
+    }
+  }
+
+  // bridgeId 바뀌면 tmux 세션만 갱신 (viewMode는 유지)
+  useEffect(() => {
+    const s = bridgeId ? findByBridgeId(bridgeId) : null
+    setTmuxSession(s?.tmux_session || null)
+  }, [bridgeId, findByBridgeId])
 
   const sidebarOpen = isDesktop ? desktopSidebarOpen : mobileSidebarOpen
   const setSidebarOpen = isDesktop ? setDesktopSidebarOpen : setMobileSidebarOpen
@@ -67,7 +110,7 @@ export function AppLayout() {
   }, [isDesktop, sidebarOpen])
 
   return (
-    <LayoutContext.Provider value={{ setTitle }}>
+    <LayoutContext.Provider value={{ setTitle, viewMode, setViewMode, tmuxSession, setTmuxSession }}>
       <div className="flex h-full overflow-hidden" style={{ paddingTop: 'env(safe-area-inset-top)', paddingLeft: 'env(safe-area-inset-left)', paddingRight: 'env(safe-area-inset-right)' }}>
         {/* ---- Sidebar ---- */}
         {isDesktop ? (
@@ -151,12 +194,22 @@ export function AppLayout() {
                 )}
               </div>
             )}
-            <button
-              onClick={() => setWebviewOpen((v) => !v)}
-              className="pointer-events-auto ml-auto flex h-10 w-10 shrink-0 aspect-square items-center justify-center rounded-full bg-background/75 backdrop-blur-xl text-muted-foreground hover:text-foreground gradient-border"
-            >
-              <Monitor className="h-4 w-4" />
-            </button>
+            <div className="pointer-events-auto ml-auto flex items-center gap-1.5">
+              <button
+                onClick={toggleTerminal}
+                className={`flex h-10 w-10 shrink-0 aspect-square items-center justify-center rounded-full backdrop-blur-xl gradient-border ${
+                  viewMode === 'terminal' ? 'bg-foreground/10 text-foreground' : 'bg-background/75 text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                <TerminalSquare className="h-4 w-4" />
+              </button>
+              <button
+                onClick={() => setWebviewOpen((v) => !v)}
+                className="flex h-10 w-10 shrink-0 aspect-square items-center justify-center rounded-full bg-background/75 backdrop-blur-xl text-muted-foreground hover:text-foreground gradient-border"
+              >
+                <Monitor className="h-4 w-4" />
+              </button>
+            </div>
           </div>
 
           {/* Content */}

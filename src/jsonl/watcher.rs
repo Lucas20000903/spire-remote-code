@@ -116,41 +116,11 @@ impl JsonlWatcher {
 
 }
 
-/// cwd에서 프로젝트 디렉토리 내 가장 최근 JSONL 파일 찾기
-async fn find_latest_jsonl(projects_dir: &Path, cwd: &str) -> anyhow::Result<std::path::PathBuf> {
-    let mangled = crate::jsonl::parser::cwd_to_project_dir(cwd);
-    let project_dir = projects_dir.join(&mangled);
-
-    if !project_dir.exists() {
-        anyhow::bail!("project dir not found for cwd: {}", cwd);
-    }
-
-    let mut best: Option<(std::path::PathBuf, std::time::SystemTime)> = None;
-    let mut read_dir = tokio::fs::read_dir(&project_dir).await?;
-    while let Some(entry) = read_dir.next_entry().await? {
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) == Some("jsonl")
-            && !path.file_name().unwrap().to_str().unwrap().starts_with("agent-")
-        {
-            if let Ok(meta) = entry.metadata().await {
-                if let Ok(modified) = meta.modified() {
-                    if best.as_ref().map_or(true, |(_, t)| modified > *t) {
-                        best = Some((path, modified));
-                    }
-                }
-            }
-        }
-    }
-
-    best.map(|(p, _)| p)
-        .ok_or_else(|| anyhow::anyhow!("no JSONL files in {}", project_dir.display()))
-}
-
-/// session_id 또는 cwd로 JSONL 파일 찾기
+/// session_id로 JSONL 파일 찾기
 async fn resolve_jsonl_path(
     projects_dir: &Path,
     session_id: &str,
-    cwd: Option<&str>,
+    _cwd: Option<&str>,
 ) -> anyhow::Result<std::path::PathBuf> {
     // 1. session_id로 직접 찾기
     if !session_id.is_empty() {
@@ -165,11 +135,7 @@ async fn resolve_jsonl_path(
         }
     }
 
-    // 2. cwd로 최신 JSONL 찾기
-    if let Some(cwd) = cwd {
-        return find_latest_jsonl(projects_dir, cwd).await;
-    }
-
+    // session_id로 JSONL을 못 찾으면 빈 결과 (cwd fallback은 잘못된 세션을 반환할 수 있음)
     anyhow::bail!("session not found: {}", session_id)
 }
 

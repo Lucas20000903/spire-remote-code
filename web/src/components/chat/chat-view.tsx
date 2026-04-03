@@ -1,13 +1,15 @@
-import { useEffect, useState, useCallback, useRef } from 'react'
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react'
 import { useParams } from 'react-router-dom'
 import { useWebSocket } from '@/hooks/use-websocket'
 import { useSessions } from '@/hooks/use-sessions'
 import { useLayout } from '@/components/layout/app-layout'
 import type { TranscriptEntry } from '@/lib/types'
-import { isConversationEntry, isSystemMessage } from '@/lib/types'
+import { isConversationEntry, isSystemMessage, extractTasks } from '@/lib/types'
 import { MessageList } from './message-list'
 import { ChatInput } from './chat-input'
 import { PermissionCard } from './permission-card'
+import { TerminalView } from '@/components/terminal/terminal-view'
+import { TaskListBlock } from './blocks/task-list-block'
 
 interface PendingPermission {
   requestId: string
@@ -22,7 +24,7 @@ export function ChatView() {
   const { bridgeId } = useParams<{ bridgeId: string }>()
   const { send, onMessage, status } = useWebSocket()
   const { findByBridgeId, markSeen } = useSessions()
-  const { setTitle } = useLayout()
+  const { setTitle, viewMode, tmuxSession } = useLayout()
   const session = findByBridgeId(bridgeId || '')
 
   const [messages, setMessages] = useState<TranscriptEntry[]>([])
@@ -74,11 +76,10 @@ export function ChatView() {
     const unsub = onMessage((msg) => {
       // 항상 최신 session 정보로 매칭
       const currentSession = findByBridgeIdRef.current(bridgeIdRef.current || '')
-      const sid = currentSession?.id || currentSession?.cwd || ''
       const msgSid = (msg as any).session_id
 
-      // session_id OR cwd 어느 것이든 매칭
-      const isMatch = msgSid === sid || msgSid === currentSession?.id || msgSid === currentSession?.cwd || msgSid === ''
+      // session_id로만 엄격 매칭
+      const isMatch = !!(msgSid && currentSession?.id && msgSid === currentSession.id)
 
       if (msg.type === 'error') {
         setLoading(false)
@@ -176,6 +177,7 @@ export function ChatView() {
   const inputRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
+    if (viewMode !== 'chat') return
     if (!inputRef.current) return
     const list = inputRef.current.parentElement?.querySelector<HTMLElement>('[data-message-list]')
     if (!list) return
@@ -184,14 +186,13 @@ export function ChatView() {
       const newPadding = entry.contentRect.height + 8
       const diff = newPadding - prevPadding
       list.style.paddingBottom = `${newPadding}px`
-      // paddingBottom이 커지면 스크롤 위치를 보정 (현재 위치 유지)
       if (diff > 0) {
         list.scrollTop += diff
       }
     })
     ro.observe(inputRef.current)
     return () => ro.disconnect()
-  }, [session])
+  }, [session, viewMode])
 
   // Set header title with last user message as subtitle
   useEffect(() => {
@@ -223,16 +224,7 @@ export function ChatView() {
     return () => setTitle(null)
   }, [session, messages, setTitle])
 
-  const isPending = bridgeId?.startsWith('pending-')
-
-  if (isPending) {
-    return (
-      <div className="flex flex-1 flex-col items-center justify-center gap-3">
-        <div className="h-5 w-5 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" />
-        <p className="text-sm text-muted-foreground">Starting session...</p>
-      </div>
-    )
-  }
+  const tasks = useMemo(() => extractTasks(messages), [messages])
 
   if (!session) {
     return (
@@ -242,8 +234,44 @@ export function ChatView() {
     )
   }
 
+  const hasBridge = session?.has_bridge === true
+  const noBridgeClaude = !hasBridge && session?.command === 'claude'
+
+  if (viewMode === 'terminal' && tmuxSession) {
+    return (
+      <div className="flex min-h-0 flex-1 flex-col pt-16 md:pt-20">
+        <TerminalView session={tmuxSession} />
+      </div>
+    )
+  }
+
+  // Claude 실행 중 + MCP 미연결 + session_id도 없음 → 이력도 없고 입력도 불가
+  if (noBridgeClaude && !session?.id) {
+    return (
+      <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-4">
+        <div className="rounded-lg border border-yellow-500/20 bg-yellow-500/5 px-4 py-3 text-center text-sm">
+          <p className="font-medium text-yellow-500">MCP 미연결</p>
+          <p className="mt-1 text-muted-foreground">
+            채널 서버가 연결되지 않아 채팅을 사용할 수 없습니다.
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            터미널 버튼으로 셸을 확인하거나, Claude Code에서 MCP를 재연결하세요.
+          </p>
+        </div>
+      </div>
+    )
+  }
+  // session_id는 있지만 Bridge 없음 → 이력은 보이고 입력만 비활성 (ChatInput에서 처리)
+
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
+      {tasks.length > 0 && (
+        <div className="shrink-0 border-b border-border/30 px-4 py-2">
+          <div className="mx-auto max-w-4xl">
+            <TaskListBlock tasks={tasks} />
+          </div>
+        </div>
+      )}
       <MessageList
         messages={messages}
         loading={loading}
@@ -284,8 +312,13 @@ export function ChatView() {
             onRespond={handlePermission}
           />
         ))}
+        {!hasBridge && session?.command === 'claude' && (
+          <div className="px-3 py-2 text-center text-xs text-yellow-500 bg-yellow-500/5 border-t border-yellow-500/10">
+            MCP 미연결 — 메시지를 보내려면 Claude Code에서 채널을 재연결하세요
+          </div>
+        )}
         <ChatInput
-          disabled={status !== 'connected'}
+          disabled={status !== 'connected' || !hasBridge}
           onSend={handleSend}
         />
       </div>
