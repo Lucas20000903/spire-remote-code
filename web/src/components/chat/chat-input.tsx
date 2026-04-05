@@ -53,7 +53,9 @@ export function ChatInput({ disabled, onSend }: ChatInputProps) {
   }, [disabled, value, files, onSend])
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.nativeEvent.isComposing) return
+    const isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0
+    if (e.key === 'Enter' && !e.shiftKey && !isMobile) {
       e.preventDefault()
       submit()
     }
