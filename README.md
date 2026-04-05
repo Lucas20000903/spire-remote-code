@@ -21,11 +21,13 @@
 
 - **Real-time chat** — Watch Claude Code work in real-time from your phone
 - **Multi-session** — Manage multiple Claude Code sessions across different projects
+- **Web terminal** — Access tmux terminal sessions directly from the browser
+- **Session status** — Hook-based tracking (idle / in-progress / completed / error)
 - **File upload** — Send images and files to Claude Code via the web UI
+- **Canvas panel** — Side panel with dev server preview and extensible tabs
 - **PWA** — Install as a native app on iOS/Android (Home Screen)
 - **Notifications** — Browser notifications when tasks complete
 - **Dark mode** — Follows system preference
-- **Dev Preview** — Draggable webview panel to preview dev servers (1600×900 scaled)
 - **Permission control** — Approve or deny Claude Code tool calls from your phone
 
 ## How it works
@@ -208,10 +210,11 @@ sequenceDiagram
 ## CLI
 
 ```bash
-spire                # Start server (default port 3000)
+spire                # Start server (default port from preferences.toml)
 spire -p 8080        # Start server on custom port
-spire cc             # Launch Claude Code with Spire channel
+spire cc             # Launch Claude Code with Spire channel (tmux)
 spire setup          # Interactive setup (MCP registration + preferences)
+spire rebuild        # Rebuild frontend from source and deploy
 spire reset-auth     # Reset auth (forgot password)
 ```
 
@@ -220,22 +223,33 @@ spire reset-auth     # Reset auth (forgot password)
 ```
 spire/
 ├── src/                     # Rust backend
-│   ├── main.rs              # Server entry, router
+│   ├── main.rs              # Server entry, router, JSONL watcher
+│   ├── state.rs             # AppState (shared state)
+│   ├── config.rs            # AppConfig (preferences.toml, env, CLI)
+│   ├── db.rs                # SQLite database
+│   ├── cli.rs               # CLI subcommands (setup, cc, rebuild)
 │   ├── auth/                # JWT authentication
 │   ├── bridge/              # Bridge registry, SSE
 │   ├── ws/                  # WebSocket hub
 │   ├── jsonl/               # JSONL parser + file watcher
-│   ├── session/             # Tmux + project scanner
+│   ├── session/             # Tmux session manager + project scanner
+│   ├── terminal.rs          # PTY terminal (tmux attach)
 │   ├── upload.rs            # File upload endpoint
 │   └── push/                # Web Push notifications
 ├── bridge/
 │   └── bridge.ts            # MCP channel server
+├── plugin/                  # Claude Code plugin (hooks + MCP config)
+│   ├── .claude-plugin/      # Plugin metadata
+│   ├── .mcp.json            # Bridge MCP server registration
+│   └── hooks/               # Session lifecycle hooks
 ├── web/
 │   └── src/
 │       ├── components/
-│       │   ├── chat/        # Chat view, messages, input
+│       │   ├── chat/        # Chat view, messages, input, canvas panel
 │       │   ├── layout/      # App layout, sidebar
-│       │   ├── webview/     # Dev server preview panel
+│       │   ├── terminal/    # Web terminal view
+│       │   ├── session/     # Session status components
+│       │   ├── webview/     # Dev server preview
 │       │   ├── settings/    # Settings dialog
 │       │   └── auth/        # Login/setup forms
 │       ├── hooks/           # useWebSocket, useSessions, useSettings
@@ -274,11 +288,13 @@ MIT
 
 - **실시간 채팅** — Claude Code의 작업을 실시간으로 폰에서 확인
 - **멀티 세션** — 여러 프로젝트의 Claude Code 세션을 동시에 관리
+- **웹 터미널** — 브라우저에서 tmux 터미널 세션에 직접 접근
+- **세션 상태** — Hook 기반 추적 (대기 / 진행 중 / 완료 / 에러)
 - **파일 업로드** — 이미지와 파일을 웹 UI에서 Claude Code로 전송
+- **캔버스 패널** — 개발 서버 미리보기 + 확장 가능한 사이드 패널
 - **PWA** — iOS/Android에서 네이티브 앱처럼 설치 (홈 화면에 추가)
 - **알림** — 작업 완료 시 브라우저 알림
 - **다크 모드** — 시스템 설정 자동 감지
-- **Dev Preview** — 드래그 가능한 웹뷰 패널로 개발 서버 미리보기 (1600×900 스케일링)
 - **Permission 제어** — 폰에서 Claude Code 도구 호출 승인/거부
 
 ### 작동 원리
