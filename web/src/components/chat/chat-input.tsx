@@ -48,7 +48,7 @@ export function ChatInput({ disabled, onSend }: ChatInputProps) {
     setValue('')
     setFiles([])
     if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto'
+      textareaRef.current.style.height = ''
     }
   }, [disabled, value, files, onSend])
 
@@ -141,7 +141,7 @@ export function ChatInput({ disabled, onSend }: ChatInputProps) {
   }
 
   return (
-    <div className={`p-4 transition-[padding] duration-200 ${active ? '' : 'px-6'}`} style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}>
+    <div className={`p-4 transition-[padding] duration-200 ${active ? '' : 'px-6'}`}>
       <div className="mx-auto max-w-4xl">
         <div
           className={`flex flex-col gap-2 rounded-3xl bg-background/80 backdrop-blur-xl border border-muted px-4 py-3 transition-colors duration-200`}
@@ -207,7 +207,7 @@ export function ChatInput({ disabled, onSend }: ChatInputProps) {
             onBlur={() => setFocused(false)}
             placeholder="메시지를 입력하세요..."
             disabled={disabled}
-            rows={1}
+            rows={2}
             className="w-full resize-none bg-transparent text-sm leading-relaxed placeholder:text-muted-foreground focus:outline-none disabled:opacity-50 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           />
 

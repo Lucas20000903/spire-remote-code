@@ -78,6 +78,12 @@ pub async fn handle_ws(ws: WebSocket, state: Arc<AppState>) {
                     Some("permission_response") => {
                         handle_permission_response(&state, &parsed).await;
                     }
+                    Some("close_session") => {
+                        handle_close_session(&state, &parsed, &session_tx).await;
+                    }
+                    Some("load_tasks") => {
+                        handle_load_tasks(&state, &parsed, &session_tx).await;
+                    }
                     Some("mark_seen") => {
                         // Hook DB의 status를 seen으로 변경 (completed → idle)
                         if let Some(sid) = parsed["session_id"].as_str() {
@@ -105,7 +111,7 @@ async fn handle_send_message(state: &AppState, msg: &serde_json::Value) {
         None => return,
     };
 
-    // bridge_id 직접 지정 > session_id로 검색
+    // bridge_id(= tmux 세션 이름) 직접 조회 > session_id로 검색
     let bridge = msg["bridge_id"]
         .as_str()
         .and_then(|id| state.registry.get(id))
@@ -135,16 +141,16 @@ async fn handle_list_sessions(
     let active_bridges = state.registry.list_active();
     let tmux_sessions = terminal::list_tmux_sessions().await;
 
-    // Hook DB: tmux_session → (session_id, status, last_prompt) 매핑
-    let hook_map: std::collections::HashMap<String, (String, String, String)> = {
+    // Hook DB: tmux_session → (session_id, status, last_prompt, updated_at) 매핑
+    let hook_map: std::collections::HashMap<String, (String, String, String, String)> = {
         let db = state.db.lock().unwrap();
         let mut stmt = db.prepare(
-            "SELECT tmux_session, session_id, status, last_prompt FROM hook_status WHERE tmux_session != ''"
+            "SELECT tmux_session, session_id, status, last_prompt, updated_at FROM hook_status WHERE tmux_session != ''"
         ).unwrap();
         stmt.query_map([], |r| {
             Ok((
                 r.get::<_, String>(0)?,
-                (r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, String>(3)?),
+                (r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, String>(3)?, r.get::<_, String>(4)?),
             ))
         }).unwrap().filter_map(|r| r.ok()).collect()
     };
@@ -155,19 +161,24 @@ async fn handle_list_sessions(
     for ts in &tmux_sessions {
         // 1. Hook DB에서 tmux_session 이름으로 정확히 매칭 (가장 신뢰)
         let hook = hook_map.get(&ts.name);
-        let hook_session_id = hook.map(|(sid, _, _)| sid.clone());
+        let hook_session_id = hook.map(|(sid, _, _, _)| sid.clone());
 
-        // 2. Active Bridge 매칭: session_id로만 (cwd fallback 제거 — 같은 cwd에 여러 세션 있으면 잘못 매칭됨)
-        let bridge = if let Some(ref hsid) = hook_session_id {
-            active_bridges.iter().find(|b| {
-                !used_bridge_ids.contains(&b.id) && b.session_id.as_deref() == Some(hsid.as_str())
-            })
-        } else {
-            None
-        };
+        // 2. Active Bridge 매칭:
+        //    a) Bridge ID == tmux 세션 이름 (Registry가 tmux_session을 키로 사용)
+        //    b) Hook session_id로 매칭
+        let bridge = active_bridges.iter().find(|b| {
+            !used_bridge_ids.contains(&b.id) && b.id == ts.name
+        }).or_else(|| {
+            if let Some(ref hsid) = hook_session_id {
+                active_bridges.iter().find(|b| {
+                    !used_bridge_ids.contains(&b.id) && b.session_id.as_deref() == Some(hsid.as_str())
+                })
+            } else {
+                None
+            }
+        });
 
-        // bridge_id는 항상 tmux 기반 (URL 안정성)
-        let bridge_id = format!("tmux:{}", ts.name);
+        let bridge_id = ts.name.clone();
         let (port, has_bridge) = if let Some(b) = bridge {
             used_bridge_ids.insert(b.id.clone());
             (b.port, true)
@@ -175,18 +186,28 @@ async fn handle_list_sessions(
             (0, false)
         };
 
-        // session_id: Hook > Bridge > None
-        let session_id = hook_session_id
-            .or_else(|| bridge.and_then(|b| b.session_id.clone()));
+        // session_id: Bridge(정확) > Hook > None
+        let session_id = bridge.and_then(|b| b.session_id.clone())
+            .or(hook_session_id);
 
         // Hook DB status를 우선 사용 (정확), fallback으로 JSONL 파싱
-        let hook_db_status = hook.map(|(_, st, _)| st.as_str()).and_then(|st| match st {
-            "idle" => Some("completed"),
-            "seen" => Some("idle"),  // 유저가 확인한 세션
-            "in-progress" | "tool-running" | "error" | "active" => Some(st),
-            "disconnected" => None,
-            _ => None,
-        });
+        // 진행 중 상태가 5분 이상 오래됐으면 stale로 판단 → JSONL fallback
+        let hook_db_status = hook.and_then(|(_, st, _, updated_at)| {
+            let is_active_status = matches!(st.as_str(), "in-progress" | "tool-running" | "active");
+            if is_active_status {
+                let is_stale = chrono::DateTime::parse_from_rfc3339(updated_at)
+                    .map(|t| chrono::Utc::now().signed_duration_since(t).num_minutes() > 5)
+                    .unwrap_or(true);
+                if is_stale { return None; }
+            }
+            match st.as_str() {
+                "idle" => Some("completed"),
+                "seen" => Some("idle"),
+                "in-progress" | "tool-running" | "error" | "active" => Some(st.as_str()),
+                "disconnected" => None,
+                _ => None,
+            }
+        }).map(String::from);
 
         let (last_msg, jsonl_status) = if let Some(ref sid) = session_id {
             let msg = get_last_user_message(&state.config.claude_projects_dir, sid).await;
@@ -342,6 +363,122 @@ async fn get_session_status(projects_dir: &std::path::Path, session_id: &str) ->
 }
 
 
+/// JSONL 전체에서 TaskCreate/TaskUpdate tool_use만 추출하여 task 목록 반환
+async fn handle_load_tasks(
+    state: &AppState,
+    msg: &serde_json::Value,
+    tx: &tokio::sync::mpsc::Sender<String>,
+) {
+    let session_id = msg["session_id"].as_str().unwrap_or("");
+    if session_id.is_empty() { return; }
+
+    // JSONL 파일 찾기
+    let path = {
+        let projects_dir = &state.config.claude_projects_dir;
+        let mut found = None;
+        if let Ok(mut read_dir) = tokio::fs::read_dir(projects_dir).await {
+            while let Ok(Some(entry)) = read_dir.next_entry().await {
+                if entry.file_type().await.map(|t| t.is_dir()).unwrap_or(false) {
+                    let candidate = entry.path().join(format!("{}.jsonl", session_id));
+                    if candidate.exists() {
+                        found = Some(candidate);
+                        break;
+                    }
+                }
+            }
+        }
+        found
+    };
+
+    let Some(path) = path else {
+        let _ = tx.send(serde_json::json!({"type": "tasks", "session_id": session_id, "tasks": []}).to_string()).await;
+        return;
+    };
+
+    // JSONL 전체 스캔 — TaskCreate/TaskUpdate만 추출
+    let content = match tokio::fs::read_to_string(&path).await {
+        Ok(c) => c,
+        Err(_) => {
+            let _ = tx.send(serde_json::json!({"type": "tasks", "session_id": session_id, "tasks": []}).to_string()).await;
+            return;
+        }
+    };
+
+    let mut tasks: std::collections::BTreeMap<u64, serde_json::Value> = std::collections::BTreeMap::new();
+    let mut auto_id: u64 = 0;
+    // tool_use_id → tool_result content 매핑
+    let mut result_map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+
+    // 1차: tool_result 수집
+    for line in content.lines() {
+        let Ok(entry) = serde_json::from_str::<serde_json::Value>(line.trim()) else { continue };
+        let Some(msg) = entry.get("message") else { continue };
+        let Some(blocks) = msg.get("content").and_then(|c| c.as_array()) else { continue };
+        for block in blocks {
+            if block.get("type").and_then(|t| t.as_str()) == Some("tool_result") {
+                if let Some(tuid) = block.get("tool_use_id").and_then(|t| t.as_str()) {
+                    let text = if let Some(s) = block.get("content").and_then(|c| c.as_str()) {
+                        s.to_string()
+                    } else if let Some(arr) = block.get("content").and_then(|c| c.as_array()) {
+                        arr.iter().filter_map(|b| b.get("text").and_then(|t| t.as_str())).collect::<Vec<_>>().join("")
+                    } else {
+                        String::new()
+                    };
+                    result_map.insert(tuid.to_string(), text);
+                }
+            }
+        }
+    }
+
+    // 2차: TaskCreate/TaskUpdate 처리
+    for line in content.lines() {
+        let Ok(entry) = serde_json::from_str::<serde_json::Value>(line.trim()) else { continue };
+        let Some(msg) = entry.get("message") else { continue };
+        let Some(blocks) = msg.get("content").and_then(|c| c.as_array()) else { continue };
+        for block in blocks {
+            if block.get("type").and_then(|t| t.as_str()) != Some("tool_use") { continue; }
+            let name = block.get("name").and_then(|n| n.as_str()).unwrap_or("");
+            let input = block.get("input");
+
+            if name == "TaskCreate" {
+                let subject = input.and_then(|i| i.get("subject")).and_then(|s| s.as_str()).unwrap_or("");
+                let desc = input.and_then(|i| i.get("description")).and_then(|s| s.as_str()).unwrap_or("");
+                // tool_result에서 Task #N 파싱
+                let tuid = block.get("id").and_then(|i| i.as_str()).unwrap_or("");
+                let parsed_id = result_map.get(tuid).and_then(|text| {
+                    text.find("Task #").and_then(|pos| {
+                        text[pos + 6..].split(|c: char| !c.is_ascii_digit()).next()?.parse::<u64>().ok()
+                    })
+                });
+                let task_id = parsed_id.unwrap_or_else(|| { auto_id += 1; auto_id });
+                tasks.insert(task_id, serde_json::json!({
+                    "id": task_id,
+                    "subject": subject,
+                    "description": desc,
+                    "status": "open",
+                }));
+            } else if name == "TaskUpdate" {
+                let raw_id = input.and_then(|i| i.get("taskId").or(i.get("id")));
+                let task_id = raw_id.and_then(|v| v.as_str().and_then(|s| s.parse::<u64>().ok()).or(v.as_u64()));
+                if let Some(tid) = task_id {
+                    if let Some(task) = tasks.get_mut(&tid) {
+                        if let Some(st) = input.and_then(|i| i.get("status")).and_then(|s| s.as_str()) {
+                            task["status"] = serde_json::Value::String(st.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let task_list: Vec<_> = tasks.values().collect();
+    let _ = tx.send(serde_json::json!({
+        "type": "tasks",
+        "session_id": session_id,
+        "tasks": task_list,
+    }).to_string()).await;
+}
+
 async fn handle_load_history(
     state: &AppState,
     msg: &serde_json::Value,
@@ -405,6 +542,38 @@ async fn handle_create_session(
                 let _ = tx.send(serde_json::to_string(&resp).unwrap()).await;
             }
         }
+    }
+}
+
+async fn handle_close_session(
+    state: &AppState,
+    msg: &serde_json::Value,
+    tx: &tokio::sync::mpsc::Sender<String>,
+) {
+    let tmux_session = match msg["tmux_session"].as_str() {
+        Some(s) => s,
+        None => return,
+    };
+
+    tracing::info!("close_session: tmux kill-session {}", tmux_session);
+
+    // tmux kill-session 실행
+    let output = crate::terminal::kill_tmux_session(tmux_session).await;
+    let ok = output.is_ok();
+
+    if ok {
+        // Bridge registry에서 해제 (bridge_id = tmux 세션 이름)
+        state.registry.unregister(tmux_session);
+
+        // 세션 목록 갱신 전달
+        handle_list_sessions(state, tx).await;
+    } else {
+        let resp = serde_json::json!({
+            "type": "session_close_failed",
+            "tmux_session": tmux_session,
+            "error": output.err().map(|e| e.to_string()).unwrap_or_default(),
+        });
+        let _ = tx.send(serde_json::to_string(&resp).unwrap()).await;
     }
 }
 

@@ -4,6 +4,7 @@ export type WsClientMessage =
   | { type: 'list_sessions' }
   | { type: 'load_history'; session_id: string; limit: number; before?: string }
   | { type: 'create_session'; cwd: string }
+  | { type: 'close_session'; tmux_session: string }
   | { type: 'subscribe'; session_id: string }
   | { type: 'unsubscribe'; session_id: string }
   | { type: 'permission_response'; bridge_id: string; request_id: string; behavior: 'allow' | 'deny' }
@@ -81,7 +82,9 @@ export interface TranscriptEntry {
 const INTERNAL_PREFIXES = [
   '<system-reminder>',
   '<local-command-caveat>',
+  '<task-notification>',
   'Caveat:', 'This session is being continued',
+  'Base directory for this skill:',
 ]
 
 /** channel 태그에서 실제 메시지 추출 */
@@ -91,12 +94,13 @@ export function extractChannelContent(text: string): string | null {
 }
 
 /** CLI 명령 메시지 파싱 */
-export function extractCommandInfo(text: string): { name: string; stdout?: string } | null {
+export function extractCommandInfo(text: string): { name: string; args?: string; stdout?: string } | null {
   const nameMatch = text.match(/<command-name>(.*?)<\/command-name>/)
   if (!nameMatch) return null
   const name = nameMatch[1]
+  const argsMatch = text.match(/<command-args>([\s\S]*?)<\/command-args>/)
   const stdoutMatch = text.match(/<local-command-stdout>([\s\S]*?)<\/local-command-stdout>/)
-  return { name, stdout: stdoutMatch?.[1]?.trim() }
+  return { name, args: argsMatch?.[1]?.trim() || undefined, stdout: stdoutMatch?.[1]?.trim() }
 }
 
 /** local-command-stdout만 있는 메시지 */

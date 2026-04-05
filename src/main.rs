@@ -259,9 +259,6 @@ async fn main() {
 
     let port = config.port;
 
-    // 서버 시작 시 stale mobile tmux 세션 정리
-    terminal::cleanup_stale_mobile_sessions().await;
-
     // JSONL watcher: watch for transcript changes and broadcast to WS clients
     let (jsonl_watcher, mut jsonl_rx) = jsonl::watcher::JsonlWatcher::new();
     jsonl_watcher
@@ -287,30 +284,7 @@ async fn main() {
     let registry_clone = state.registry.clone();
     tokio::spawn(async move {
         while let Ok(update) = jsonl_rx.recv().await {
-            // 엔트리의 cwd 필드로 bridge 매칭 + session_id 자동 설정
-            let entry_cwd = update.entries.first().and_then(|e| e.cwd.clone());
-            let entry_ts = update.entries.last()
-                .and_then(|e| chrono::DateTime::parse_from_rfc3339(&e.timestamp).ok())
-                .map(|dt| dt.with_timezone(&chrono::Utc));
-
-            if !update.session_id.is_empty() {
-                let existing = registry_clone.find_by_session(&update.session_id);
-                // 이미 이 session_id가 매칭된 bridge가 없는 경우에만 auto-match
-                if existing.is_none() {
-                    if let Some(ref cwd) = entry_cwd {
-                        let bridges = registry_clone.list_active();
-                        // session_id가 아직 None인 bridge 중 cwd 매칭 + 엔트리가 bridge 등록 이후인 것만
-                        if let Some(bridge) = bridges.iter().find(|b| {
-                            b.session_id.is_none()
-                                && (b.cwd == *cwd || cwd.starts_with(&b.cwd) || b.cwd.starts_with(cwd.as_str()))
-                                && entry_ts.map_or(true, |ts| ts >= b.registered_at)
-                        }) {
-                            registry_clone.update_session(&bridge.id, update.session_id.clone());
-                            tracing::info!("auto-matched session {} to bridge {} (cwd: {})", update.session_id, bridge.id, cwd);
-                        }
-                    }
-                }
-            }
+            // session_id 매칭은 Hook DB의 tmux_session에만 의존 (auto-match 제거)
 
             // bridge_id 역조회: session_id로 찾기
             let bridge_id = registry_clone.find_by_session(&update.session_id)
@@ -474,6 +448,9 @@ async fn main() {
         .route("/api/tmux/sessions", get(terminal::tmux_sessions_handler))
         .route("/api/tmux/debug", get(terminal::tmux_debug_handler))
         .route("/ws/terminal", get(terminal::terminal_ws))
+        // localhost 포트 프록시 (원격 접속 시 iframe에서 localhost 접근 불가 → 서버 경유)
+        .route("/proxy/{port}/{*rest}", get(proxy_localhost))
+        .route("/proxy/{port}/", get(proxy_localhost))
         .merge(protected)
         .layer(cors)
         .with_state(state);
@@ -486,9 +463,47 @@ async fn main() {
         );
     }
 
+    // localhost 프록시 — 원격 접속 시 localhost의 개발 서버에 접근하기 위한 역방향 프록시
+    async fn proxy_localhost(
+        axum::extract::Path(params): axum::extract::Path<(u16, Option<String>)>,
+        req: axum::http::Request<axum::body::Body>,
+    ) -> impl IntoResponse {
+        let (target_port, rest) = params;
+        let path = rest.as_deref().unwrap_or("");
+        let query = req.uri().query().map(|q| format!("?{}", q)).unwrap_or_default();
+        let url = format!("http://127.0.0.1:{}/{}{}", target_port, path, query);
+
+        let client = reqwest::Client::new();
+        match client.get(&url).send().await {
+            Ok(resp) => {
+                let status = axum::http::StatusCode::from_u16(resp.status().as_u16())
+                    .unwrap_or(axum::http::StatusCode::BAD_GATEWAY);
+                let mut builder = axum::http::Response::builder().status(status);
+                // content-type 전달
+                if let Some(ct) = resp.headers().get("content-type") {
+                    builder = builder.header("content-type", ct);
+                }
+                let body = resp.bytes().await.unwrap_or_default();
+                builder.body(axum::body::Body::from(body)).unwrap()
+            }
+            Err(_) => {
+                axum::http::Response::builder()
+                    .status(axum::http::StatusCode::BAD_GATEWAY)
+                    .body(axum::body::Body::from("proxy error: target unreachable"))
+                    .unwrap()
+            }
+        }
+    }
+
     let addr = format!("0.0.0.0:{}", port);
     println!("\n  Spire v{}", env!("CARGO_PKG_VERSION"));
     println!("  Server: http://{}\n", addr);
-    let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
+    let listener = match tokio::net::TcpListener::bind(&addr).await {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("포트 {} 바인딩 실패: {} (이미 사용 중일 수 있음)", port, e);
+            std::process::exit(1);
+        }
+    };
     axum::serve(listener, app).await.unwrap();
 }

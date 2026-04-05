@@ -10,6 +10,7 @@ interface SessionsContextValue {
   active: SessionInfo[]
   recent: SessionInfo[]
   createSession: (cwd: string) => void
+  closeSession: (bridgeId: string) => void
   findByBridgeId: (bridgeId: string) => SessionInfo | undefined
   completedCount: number
   markSeen: (bridgeId: string) => void
@@ -195,6 +196,17 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
     [send],
   )
 
+  const closeSession = useCallback(
+    (bridgeId: string) => {
+      const session = active.find((s) => s.bridge_id === bridgeId)
+      if (!session?.tmux_session) return
+      // Optimistic: 즉시 목록에서 제거
+      setActive((prev) => prev.filter((s) => s.bridge_id !== bridgeId))
+      send({ type: 'close_session', tmux_session: session.tmux_session } as any)
+    },
+    [active, send],
+  )
+
   const findByBridgeId = useCallback(
     (bridgeId: string) => active.find((s) => s.bridge_id === bridgeId),
     [active],
@@ -220,7 +232,7 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
   const completedCount = active.filter((s) => s.status === 'completed').length
 
   return (
-    <SessionsContext.Provider value={{ active, recent, createSession, findByBridgeId, completedCount, markSeen }}>
+    <SessionsContext.Provider value={{ active, recent, createSession, closeSession, findByBridgeId, completedCount, markSeen }}>
       {children}
     </SessionsContext.Provider>
   )

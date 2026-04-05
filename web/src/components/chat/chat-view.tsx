@@ -18,13 +18,13 @@ interface PendingPermission {
   inputPreview: string
 }
 
-const PAGE_SIZE = 50
+const PAGE_SIZE = 100
 
 export function ChatView() {
   const { bridgeId } = useParams<{ bridgeId: string }>()
   const { send, onMessage, status } = useWebSocket()
   const { findByBridgeId, markSeen } = useSessions()
-  const { setTitle, viewMode, tmuxSession } = useLayout()
+  const { setTitle, viewMode, tmuxSession, isKeyboardOpen } = useLayout()
   const session = findByBridgeId(bridgeId || '')
 
   const [messages, setMessages] = useState<TranscriptEntry[]>([])
@@ -32,6 +32,7 @@ export function ChatView() {
   const [hasMore, setHasMore] = useState(true)
   const initialLoadDone = useRef(false)
   const [permissions, setPermissions] = useState<PendingPermission[]>([])
+  const [serverTasks, setServerTasks] = useState<import('@/lib/types').TaskItem[]>([])
 
 
   const sessionId = session?.id || session?.cwd || ''
@@ -57,6 +58,7 @@ export function ChatView() {
     setLoading(false)
     initialLoadDone.current = false
     setPermissions([])
+    setServerTasks([])
     if (bridgeId) markSeen(bridgeId)
   }, [bridgeId, markSeen])
 
@@ -69,6 +71,7 @@ export function ChatView() {
     setLoading(true)
     initialLoadDone.current = true
     send({ type: 'load_history', session_id: actualSessionId, limit: PAGE_SIZE, cwd: session?.cwd } as any)
+    send({ type: 'load_tasks', session_id: actualSessionId } as any)
   }, [actualSessionId])
 
   // Handle incoming WS messages
@@ -84,6 +87,10 @@ export function ChatView() {
       if (msg.type === 'error') {
         setLoading(false)
         setHasMore(false)
+      }
+
+      if ((msg as any).type === 'tasks' && isMatch) {
+        setServerTasks((msg as any).tasks || [])
       }
 
       if (msg.type === 'history' && isMatch) {
@@ -224,7 +231,17 @@ export function ChatView() {
     return () => setTitle(null)
   }, [session, messages, setTitle])
 
-  const tasks = useMemo(() => extractTasks(messages), [messages])
+  // 서버가 전체 JSONL에서 추출한 task 목록 우선, 실시간 업데이트는 메시지에서 보충
+  const tasks = useMemo(() => {
+    const fromMessages = extractTasks(messages)
+    if (serverTasks.length === 0) return fromMessages
+    // 서버 task를 기반으로 하되, 메시지에서 더 최신 status가 있으면 반영
+    const msgMap = new Map(fromMessages.map((t) => [t.id, t]))
+    return serverTasks.map((t) => {
+      const updated = msgMap.get(t.id)
+      return updated && updated.status !== 'open' ? updated : t
+    })
+  }, [serverTasks, messages])
 
   if (!session) {
     return (
@@ -265,13 +282,6 @@ export function ChatView() {
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
-      {tasks.length > 0 && (
-        <div className="shrink-0 border-b border-border/30 px-4 py-2">
-          <div className="mx-auto max-w-4xl">
-            <TaskListBlock tasks={tasks} />
-          </div>
-        </div>
-      )}
       <MessageList
         messages={messages}
         loading={loading}
@@ -301,26 +311,35 @@ export function ChatView() {
           return false
         })()}
       />
-      <div ref={inputRef} className="absolute bottom-0 left-0 right-0 z-10">
-        {permissions.map((p) => (
-          <PermissionCard
-            key={p.requestId}
-            requestId={p.requestId}
-            toolName={p.toolName}
-            description={p.description}
-            inputPreview={p.inputPreview}
-            onRespond={handlePermission}
+      <div ref={inputRef} className="absolute bottom-0 left-0 right-0 z-10" style={{ paddingBottom: isKeyboardOpen ? 0 : 'env(safe-area-inset-bottom, 0px)' }}>
+        <div className="mx-auto max-w-4xl">
+          {tasks.length > 0 && (
+            <div className="px-3 py-2">
+              <TaskListBlock tasks={tasks} />
+            </div>
+          )}
+          {permissions.map((p) => (
+            <PermissionCard
+              key={p.requestId}
+              requestId={p.requestId}
+              toolName={p.toolName}
+              description={p.description}
+              inputPreview={p.inputPreview}
+              onRespond={handlePermission}
+            />
+          ))}
+          {!hasBridge && session?.command === 'claude' && (
+            <div className="px-3 py-2">
+              <div className="rounded-lg border border-border/50 bg-muted/80 px-3 py-2 text-center text-xs text-yellow-500">
+                MCP 미연결 — 메시지를 보내려면 Claude Code에서 채널을 재연결하세요
+              </div>
+            </div>
+          )}
+          <ChatInput
+            disabled={status !== 'connected' || !hasBridge}
+            onSend={handleSend}
           />
-        ))}
-        {!hasBridge && session?.command === 'claude' && (
-          <div className="px-3 py-2 text-center text-xs text-yellow-500 bg-yellow-500/5 border-t border-yellow-500/10">
-            MCP 미연결 — 메시지를 보내려면 Claude Code에서 채널을 재연결하세요
-          </div>
-        )}
-        <ChatInput
-          disabled={status !== 'connected' || !hasBridge}
-          onSend={handleSend}
-        />
+        </div>
       </div>
     </div>
   )

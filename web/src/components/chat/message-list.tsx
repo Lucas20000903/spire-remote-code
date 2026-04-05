@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback, useMemo, type ReactNode } from 'react'
+import { useLayoutEffect, useRef, useCallback, useMemo, type ReactNode } from 'react'
 import type { TranscriptEntry, ContentBlock } from '@/lib/types'
 import { buildToolResultMap, isToolResultOnlyEntry, isToolUseOnlyEntry } from '@/lib/types'
 import { MessageItem } from './message-item'
@@ -74,6 +74,7 @@ export function MessageList({
   const toolResultMap = useMemo(() => buildToolResultMap(messages), [messages])
 
   const prevScrollHeightRef = useRef(0)
+  const prevScrollTopRef = useRef(0)
   const isLoadingMore = useRef(false)
   const isProgrammaticScroll = useRef(false)
   const userScrolledUp = useRef(false)
@@ -94,9 +95,10 @@ export function MessageList({
       shouldAutoScroll.current = true
     }
 
-    if (el.scrollTop < 50 && hasMore && !loading && !isLoadingMore.current) {
+    if (userScrolledUp.current && el.scrollTop < el.scrollHeight * 0.5 && hasMore && !loading && !isLoadingMore.current) {
       isLoadingMore.current = true
       prevScrollHeightRef.current = el.scrollHeight
+      prevScrollTopRef.current = el.scrollTop
       onLoadMore()
     }
   }, [hasMore, loading, onLoadMore])
@@ -111,7 +113,8 @@ export function MessageList({
     requestAnimationFrame(() => { isProgrammaticScroll.current = false })
   }, [])
 
-  useEffect(() => {
+  // useLayoutEffect: paint 전에 스크롤 위치 복원 → 깜빡임 방지
+  useLayoutEffect(() => {
     if (messages.length === 0) return
     const el = containerRef.current
 
@@ -119,8 +122,11 @@ export function MessageList({
       isInitialLoad.current = false
       scrollToBottom()
     } else if (isLoadingMore.current && el) {
-      const newScrollHeight = el.scrollHeight
-      el.scrollTop = newScrollHeight - prevScrollHeightRef.current
+      // 새 메시지가 위에 추가된 만큼 scrollTop 보정
+      const heightDiff = el.scrollHeight - prevScrollHeightRef.current
+      isProgrammaticScroll.current = true
+      el.scrollTop = prevScrollTopRef.current + heightDiff
+      requestAnimationFrame(() => { isProgrammaticScroll.current = false })
       isLoadingMore.current = false
     } else if (shouldAutoScroll.current && !userScrolledUp.current) {
       scrollToBottom()
@@ -232,7 +238,7 @@ export function MessageList({
       ref={containerRef}
       data-message-list
       onScroll={handleScroll}
-      className="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain px-4 py-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      className="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain px-4 pb-4 pt-16 md:pt-20 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
     >
       <div className="mx-auto max-w-4xl">
         {loading && (

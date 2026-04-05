@@ -7,7 +7,7 @@ import { LoginForm } from '@/components/auth/login-form'
 import { AppLayout } from '@/components/layout/app-layout'
 import { ChatView } from '@/components/chat/chat-view'
 import { ChatIntro } from '@/components/chat/chat-intro'
-// TerminalPage는 이제 ChatView 내부에서 viewMode로 전환
+import { MockPreview } from '@/components/chat/mock-preview'
 
 function AuthenticatedApp() {
   return (
@@ -17,6 +17,7 @@ function AuthenticatedApp() {
         <Route element={<AppLayout />}>
           <Route path="/chat/intro" element={<ChatIntro />} />
           <Route path="/chat/:bridgeId" element={<ChatView />} />
+          <Route path="/mock" element={<MockPreview />} />
           <Route path="*" element={<Navigate to="/chat/intro" replace />} />
         </Route>
       </Routes>

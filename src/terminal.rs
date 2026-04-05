@@ -54,58 +54,6 @@ async fn tmux_session_exists(name: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// grouped session 생성 (독립 resize 가능). base 세션 이름에서 고정 이름 생성.
-async fn create_grouped_session(base: &str) -> anyhow::Result<String> {
-    let mobile_name = format!("spire-mobile-{}", base);
-
-    // 기존 mobile 세션이 있으면 제거 후 재생성
-    let _ = tmux_cmd()
-        .args(["kill-session", "-t", &mobile_name])
-        .output()
-        .await;
-
-    let output = tmux_cmd()
-        .args(["new-session", "-d", "-s", &mobile_name, "-t", base])
-        .output()
-        .await?;
-
-    if !output.status.success() {
-        anyhow::bail!(
-            "grouped session 생성 실패: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-    Ok(mobile_name)
-}
-
-/// grouped session 정리
-async fn cleanup_grouped_session(mobile_name: &str) {
-    let _ = tmux_cmd()
-        .args(["kill-session", "-t", mobile_name])
-        .output()
-        .await;
-}
-
-/// 서버 시작 시 stale grouped session 정리
-pub async fn cleanup_stale_mobile_sessions() {
-    let output = tmux_cmd()
-        .args(["list-sessions", "-F", "#{session_name}"])
-        .output()
-        .await;
-
-    if let Ok(output) = output {
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        for name in stdout.lines() {
-            if name.starts_with("spire-mobile-") {
-                let _ = tmux_cmd()
-                    .args(["kill-session", "-t", name])
-                    .output()
-                    .await;
-                tracing::info!("cleaned up stale mobile session: {}", name);
-            }
-        }
-    }
-}
 
 /// tmux 세션 목록 조회
 pub async fn list_tmux_sessions() -> Vec<TmuxSession> {
@@ -156,7 +104,7 @@ pub async fn list_tmux_sessions() -> Vec<TmuxSession> {
 }
 
 /// 프로세스 테이블을 한 번 읽어서 (pid → ppid, comm) 맵 생성
-async fn load_process_table() -> Vec<(u32, u32, String)> {
+pub async fn load_process_table() -> Vec<(u32, u32, String)> {
     let output = tokio::process::Command::new("ps")
         .args(["-eo", "pid,ppid,comm"])
         .output()
@@ -202,7 +150,7 @@ fn get_descendants_and_claude(
 }
 
 /// pane_pid 조회
-async fn get_pane_pid(session_name: &str) -> Option<u32> {
+pub async fn get_pane_pid(session_name: &str) -> Option<u32> {
     let output = tmux_cmd()
         .args(["list-panes", "-t", session_name, "-F", "#{pane_pid}"])
         .output()
@@ -237,6 +185,22 @@ pub struct TmuxSession {
     /// pane_pid의 자손 PID 목록 (Bridge PID 매칭용)
     #[serde(skip)]
     pub descendant_pids: Vec<u32>,
+}
+
+/// tmux 세션 종료
+pub async fn kill_tmux_session(name: &str) -> anyhow::Result<()> {
+    let output = tmux_cmd()
+        .args(["kill-session", "-t", name])
+        .output()
+        .await?;
+
+    if !output.status.success() {
+        anyhow::bail!(
+            "tmux kill-session failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    Ok(())
 }
 
 /// GET /api/tmux/sessions
@@ -303,22 +267,12 @@ pub async fn terminal_ws(
     Ok(ws.on_upgrade(move |socket| handle_terminal(socket, session, cols, rows)))
 }
 
-async fn handle_terminal(socket: WebSocket, base_session: String, cols: u16, rows: u16) {
-    // grouped session 생성 (폰 화면 크기가 원본 터미널에 영향 주지 않도록)
-    let mobile_session = match create_grouped_session(&base_session).await {
-        Ok(name) => name,
-        Err(e) => {
-            tracing::error!("grouped session 생성 실패: {}", e);
-            return;
-        }
-    };
-
+async fn handle_terminal(socket: WebSocket, session_name: String, cols: u16, rows: u16) {
     // PTY 할당
     let (pty, pts) = match pty_process::open() {
         Ok(pair) => pair,
         Err(e) => {
             tracing::error!("PTY 할당 실패: {}", e);
-            cleanup_grouped_session(&mobile_session).await;
             return;
         }
     };
@@ -327,7 +281,7 @@ async fn handle_terminal(socket: WebSocket, base_session: String, cols: u16, row
         tracing::warn!("PTY 크기 설정 실패: {}", e);
     }
 
-    // mobile grouped session에 attach
+    // tmux 세션에 직접 attach (읽기 전용 — resize는 PTY 레벨에서만 적용)
     let tmux_bin = ["/opt/homebrew/bin/tmux", "/usr/local/bin/tmux", "/usr/bin/tmux"]
         .iter()
         .find(|p| std::path::Path::new(p).exists())
@@ -342,17 +296,16 @@ async fn handle_terminal(socket: WebSocket, base_session: String, cols: u16, row
         .env("LC_ALL", "ko_KR.UTF-8")
         .env("TMUX_TMPDIR", "/private/tmp")
         .env("HOME", &home)
-        .args(["attach", "-t", &mobile_session]);
+        .args(["attach", "-t", &session_name]);
     let mut child: tokio::process::Child = match cmd.spawn(pts) {
         Ok(child) => child,
         Err(e) => {
             tracing::error!("tmux attach 실패: {}", e);
-            cleanup_grouped_session(&mobile_session).await;
             return;
         }
     };
 
-    tracing::info!("terminal connected: {} → {}", base_session, mobile_session);
+    tracing::info!("terminal connected: {}", session_name);
 
     let (mut ws_sender, mut ws_receiver) = socket.split();
     let (mut pty_reader, mut pty_writer): (pty_process::OwnedReadPty, pty_process::OwnedWritePty) = pty.into_split();
@@ -419,9 +372,7 @@ async fn handle_terminal(socket: WebSocket, base_session: String, cols: u16, row
         _ = child.wait() => {},
     }
 
-    // grouped session 정리
-    cleanup_grouped_session(&mobile_session).await;
-    tracing::info!("terminal disconnected: {}", base_session);
+    tracing::info!("terminal disconnected: {}", session_name);
 }
 
 #[derive(Deserialize)]

@@ -9,11 +9,11 @@ fn load_skip_permissions() -> bool {
 }
 
 /// Create a new Claude Code session in a tmux window for the given working directory.
-/// Reads user preferences for skip_permissions. Always uses expect to auto-confirm.
 pub async fn create_session(cwd: &str) -> anyhow::Result<String> {
     let short_id = &uuid::Uuid::new_v4().to_string()[..8];
     let session_name = format!("spire-{}", short_id);
 
+    // tmux 세션 생성 (cwd 지정)
     let output = Command::new("tmux")
         .args(["new-session", "-d", "-s", &session_name, "-c", cwd])
         .output()
@@ -26,21 +26,35 @@ pub async fn create_session(cwd: &str) -> anyhow::Result<String> {
         );
     }
 
-    let mut claude_args = String::from("claude --dangerously-load-development-channels server:spire");
+    // Claude Code 명령어 구성
+    let mut claude_args = vec![
+        "claude".to_string(),
+        "--dangerously-load-development-channels".to_string(),
+        "server:spire".to_string(),
+    ];
     if load_skip_permissions() {
-        claude_args.push_str(" --dangerously-skip-permissions");
+        claude_args.push("--dangerously-skip-permissions".to_string());
     }
 
-    // expect로 "Enter to confirm" 자동 확인
-    let expect_cmd = format!(
-        "expect -c 'set timeout 30; spawn {}; expect \"Enter to confirm\"; send \"\\r\"; interact'",
-        claude_args
-    );
+    let claude_cmd = claude_args.join(" ");
+
+    // 직접 send-keys로 명령어 실행 (expect 불필요)
     let _ = Command::new("tmux")
-        .args(["send-keys", "-t", &session_name, &expect_cmd, "Enter"])
+        .args(["send-keys", "-t", &session_name, &claude_cmd, "Enter"])
         .output()
         .await?;
 
+    // 2초 후 Enter 한번 더 (채널 확인 프롬프트 자동 승인)
+    tokio::spawn({
+        let name = session_name.clone();
+        async move {
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            let _ = Command::new("tmux")
+                .args(["send-keys", "-t", &name, "", "Enter"])
+                .output()
+                .await;
+        }
+    });
+
     Ok(session_name)
 }
-

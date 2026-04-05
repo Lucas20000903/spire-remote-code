@@ -137,7 +137,7 @@ export function TerminalView({ session, onClose }: TerminalViewProps) {
           </button>
         )}
       </div>
-      <div ref={containerRef} className="flex-1 p-1" />
+      <div ref={containerRef} className="flex-1 p-1" style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 4px)' }} />
     </div>
   )
 }

@@ -144,6 +144,8 @@ export function MessageItem({ entry, toolResultMap, nextTimestamp, isHistorical,
   const { content } = entry.message
 
   if (typeof content === 'string' && isInternalContent(content)) return null
+  if (Array.isArray(content) && content.length > 0 && content[0].type === 'text'
+    && (content[0] as { text: string }).text?.startsWith('Base directory for this skill:')) return null
 
   // 특수 메시지 처리
   let displayContent = content
@@ -154,9 +156,23 @@ export function MessageItem({ entry, toolResultMap, nextTimestamp, isHistorical,
       displayContent = channelText
     }
 
-    // CLI 명령 메시지 → 컴팩트 블록
+    // CLI 명령 메시지 → 스킬 블록 + 유저 메시지 분리
     const cmdInfo = extractCommandInfo(content)
     if (cmdInfo) {
+      if (cmdInfo.args) {
+        return (
+          <div className="space-y-1.5">
+            <div className="py-1 flex items-center gap-1.5 text-[13px] text-muted-foreground">
+              <span className="font-mono text-foreground/70">{cmdInfo.name}</span>
+            </div>
+            <div className="flex items-center justify-end">
+              <div className="max-w-[85%] overflow-hidden rounded-2xl bg-secondary px-4 py-2.5 text-secondary-foreground break-words">
+                <div className="text-sm">{cmdInfo.args}</div>
+              </div>
+            </div>
+          </div>
+        )
+      }
       return (
         <div className="py-1 flex items-center gap-1.5 text-[13px] text-muted-foreground">
           <span className="font-mono text-foreground/70">{cmdInfo.name}</span>

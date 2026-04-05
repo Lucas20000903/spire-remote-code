@@ -25,6 +25,19 @@ const PORT_MAX = parseInt(process.env.BRIDGE_PORT_MAX || '8899')
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
+// --- Detect tmux session name ---
+import { execSync } from 'child_process'
+
+function detectTmuxSession(): string | null {
+  try {
+    return execSync("tmux display -p '#{session_name}'", { encoding: 'utf-8' }).trim() || null
+  } catch {
+    return null
+  }
+}
+
+const tmuxSession = detectTmuxSession()
+
 // --- Find free port ---
 async function findFreePort(): Promise<number> {
   for (let port = PORT_MIN; port <= PORT_MAX; port++) {
@@ -52,6 +65,7 @@ async function register(port: number): Promise<string> {
       session_id: null,
       cwd: process.cwd(),
       pid: process.pid,
+      tmux_session: tmuxSession,
     }),
   })
   const data = await res.json() as { bridge_id: string }

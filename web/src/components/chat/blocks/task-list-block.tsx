@@ -31,7 +31,7 @@ export function TaskListBlock({ tasks }: TaskListBlockProps) {
   const progressPercent = Math.round((completed / total) * 100)
 
   return (
-    <div className="rounded-lg border border-border/50 bg-muted/20 overflow-hidden">
+    <div className="rounded-lg border border-border/50 bg-muted/80 overflow-hidden">
       {/* 헤더 (토글) */}
       <button
         onClick={() => setOpen((prev) => !prev)}

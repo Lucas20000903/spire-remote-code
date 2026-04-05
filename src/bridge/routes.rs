@@ -13,6 +13,7 @@ pub struct RegisterRequest {
     pub session_id: Option<String>,
     pub cwd: String,
     pub pid: u32,
+    pub tmux_session: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -39,7 +40,7 @@ pub async fn register(
     State(registry): State<Arc<BridgeRegistry>>,
     Json(req): Json<RegisterRequest>,
 ) -> Json<RegisterResponse> {
-    let id = registry.register(req.port, req.session_id, req.cwd, req.pid);
+    let id = registry.register(req.port, req.session_id, req.cwd, req.pid, req.tmux_session);
     Json(RegisterResponse { bridge_id: id })
 }
 

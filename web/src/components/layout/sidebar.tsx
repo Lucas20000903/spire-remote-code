@@ -4,7 +4,7 @@ import { motion } from 'motion/react'
 import { useSessions } from '@/hooks/use-sessions'
 import { useWebSocket } from '@/hooks/use-websocket'
 import { fetchFavorites } from '@/lib/api'
-import { Plus, Star, Loader2, Settings, LogOut, Bot, TerminalSquare } from 'lucide-react'
+import { Plus, Star, Loader2, Settings, LogOut, Bot, TerminalSquare, X } from 'lucide-react'
 import { SettingsDialog } from '@/components/settings/settings-dialog'
 import type { SessionInfo, SessionStatus } from '@/lib/types'
 
@@ -50,7 +50,7 @@ interface SidebarContentProps {
 }
 
 export function SidebarContent({ onSelect }: SidebarContentProps) {
-  const { active, createSession } = useSessions()
+  const { active, createSession, closeSession } = useSessions()
   const { status } = useWebSocket()
   const logout = () => { localStorage.removeItem('token'); window.location.reload() }
   const navigate = useNavigate()
@@ -162,25 +162,45 @@ export function SidebarContent({ onSelect }: SidebarContentProps) {
               const selected = s.bridge_id === bridgeId
               const isPending = s.status === 'pending'
               return (
-                <button
+                <div
                   key={s.bridge_id}
-                  onClick={() => handleSelect(s)}
-                  className={`w-full rounded-lg px-3 py-2.5 text-left transition-colors ${
+                  className={`group/session relative flex items-center rounded-lg transition-colors ${
                     selected ? 'bg-muted/50 border border-border' : 'hover:bg-muted/30'
                   }`}
                 >
-                  <div className="flex items-center gap-2">
-                    <StatusIndicator status={s.status} />
-                    {s.command === 'claude' ? (
-                      <Bot className="h-3 w-3 shrink-0 text-violet-400" />
-                    ) : s.command ? (
-                      <TerminalSquare className="h-3 w-3 shrink-0 text-zinc-500" />
-                    ) : null}
-                    <span className={`truncate text-sm ${isPending ? 'animate-pulse text-muted-foreground' : ''}`}>
-                      {s.lastUserMessage || 'New Session'}
-                    </span>
-                  </div>
-                </button>
+                  <button
+                    onClick={() => handleSelect(s)}
+                    className="flex-1 min-w-0 px-3 py-2.5 text-left"
+                  >
+                    <div className="flex items-center gap-2">
+                      <StatusIndicator status={s.status} />
+                      {s.command === 'claude' ? (
+                        <Bot className="h-3 w-3 shrink-0 text-violet-400" />
+                      ) : s.command ? (
+                        <TerminalSquare className="h-3 w-3 shrink-0 text-zinc-500" />
+                      ) : null}
+                      <span className={`truncate text-sm ${isPending ? 'animate-pulse text-muted-foreground' : ''}`}>
+                        {s.lastUserMessage || 'New Session'}
+                      </span>
+                    </div>
+                  </button>
+                  {s.tmux_session && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        if (!confirm('이 세션을 종료하시겠습니까?')) return
+                        if (selected) {
+                          navigate('/chat/intro')
+                          onSelect?.()
+                        }
+                        closeSession(s.bridge_id)
+                      }}
+                      className="shrink-0 mr-2 rounded p-1 text-muted-foreground/0 group-hover/session:text-muted-foreground hover:!text-foreground hover:bg-muted/50 transition-colors"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  )}
+                </div>
               )
             })}
           </motion.div>

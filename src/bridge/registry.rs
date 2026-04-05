@@ -67,76 +67,46 @@ impl BridgeRegistry {
         session_id: Option<String>,
         cwd: String,
         pid: u32,
+        tmux_session: Option<String>,
     ) -> String {
-        // 1. 메모리에서 같은 pid의 기존 등록 재사용
-        {
-            let mut bridges = self.bridges.write().unwrap();
-            if let Some(existing) = bridges.values_mut().find(|b| b.pid == pid) {
-                let id = existing.id.clone();
-                existing.port = port;
-                existing.cwd = cwd.clone();
-                existing.registered_at = chrono::Utc::now();
-                if session_id.is_some() {
-                    existing.session_id = session_id.clone();
-                }
-                let info = existing.clone();
-                tracing::info!("bridge reused (memory): {} (pid={}, port={})", id, pid, port);
-                self.db_upsert_session(&info);
-                let _ = self.event_tx.send(BridgeEvent::Registered(info));
-                return id;
-            }
-        }
+        // 키 결정: tmux 세션 이름 > br-{uuid} 폴백
+        let id = tmux_session.clone()
+            .unwrap_or_else(|| format!("br-{}", uuid::Uuid::new_v4().as_simple()));
 
-        // 2. DB에서 같은 cwd+pid로 이전 세션 복원 시도
-        let restored = self.db_find_session(pid, &cwd);
-        if let Some((old_bridge_id, old_session_id)) = restored {
-            tracing::info!(
-                "bridge restored (db): {} (pid={}, cwd={}, session={:?})",
-                old_bridge_id, pid, cwd, old_session_id
-            );
-            let merged_session = session_id.or(old_session_id);
-            let info = BridgeInfo {
-                id: old_bridge_id.clone(),
-                port,
-                session_id: merged_session,
-                cwd,
-                pid,
-                registered_at: chrono::Utc::now(),
-            };
-            self.bridges
-                .write()
-                .unwrap()
-                .insert(old_bridge_id.clone(), info.clone());
-            self.message_queues
-                .write()
-                .unwrap()
-                .insert(old_bridge_id.clone(), Vec::new());
-            self.db_upsert_session(&info);
-            let _ = self.event_tx.send(BridgeEvent::Registered(info));
-            return old_bridge_id;
-        }
+        // 기존 등록이 있으면 pid/port만 업데이트 (MCP 재연결 시 키 유지)
+        let mut bridges = self.bridges.write().unwrap();
+        let merged_session = if let Some(existing) = bridges.get(&id) {
+            session_id.or(existing.session_id.clone())
+        } else {
+            // hook_status에서 session_id 복원 시도
+            session_id.or_else(|| {
+                tmux_session.as_ref().and_then(|ts| {
+                    let conn = self.db.lock().unwrap();
+                    conn.query_row(
+                        "SELECT session_id FROM hook_status WHERE tmux_session = ?1 AND session_id != ''",
+                        [ts],
+                        |r| r.get::<_, String>(0),
+                    ).ok()
+                })
+            })
+        };
 
-        // 3. 완전히 새로운 등록
-        tracing::info!("bridge new: cwd={}, port={}, pid={}", cwd, port, pid);
-        let id = format!("br-{}", uuid::Uuid::new_v4().as_simple());
         let info = BridgeInfo {
             id: id.clone(),
             port,
-            session_id,
+            session_id: merged_session,
             cwd,
             pid,
             registered_at: chrono::Utc::now(),
         };
-        self.bridges
-            .write()
-            .unwrap()
-            .insert(id.clone(), info.clone());
-        self.message_queues
-            .write()
-            .unwrap()
-            .insert(id.clone(), Vec::new());
+        bridges.insert(id.clone(), info.clone());
+        drop(bridges);
+
+        self.message_queues.write().unwrap().entry(id.clone()).or_default();
         self.db_upsert_session(&info);
         let _ = self.event_tx.send(BridgeEvent::Registered(info));
+
+        tracing::info!("bridge registered: {} (pid={}, port={})", id, pid, port);
         id
     }
 
@@ -271,21 +241,4 @@ impl BridgeRegistry {
         .ok();
     }
 
-    /// DB에서 cwd+pid로 이전 세션 찾기 (서버 재시작 후 복원용)
-    fn db_find_session(&self, pid: u32, cwd: &str) -> Option<(String, Option<String>)> {
-        let conn = self.db.lock().unwrap();
-        conn.query_row(
-            "SELECT id, session_id FROM session
-             WHERE pid = ?1 AND cwd = ?2
-             ORDER BY last_active DESC LIMIT 1",
-            rusqlite::params![pid, cwd],
-            |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, Option<String>>(1)?,
-                ))
-            },
-        )
-        .ok()
-    }
 }

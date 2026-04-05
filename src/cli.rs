@@ -392,7 +392,10 @@ pub fn service_rebuild() {
     println!("[3/3] Installing...");
     std::fs::create_dir_all(&install_dir).ok();
     std::fs::create_dir_all(data_dir.join("web")).ok();
-    let _ = std::fs::copy(repo.join("target/release/spire"), install_dir.join("spire"));
+    // macOS 코드 서명 캐시 문제 방지: rm 후 cp
+    let dest = install_dir.join("spire");
+    let _ = std::fs::remove_file(&dest);
+    let _ = std::fs::copy(repo.join("target/release/spire"), &dest);
     // Copy web/dist contents
     if let Ok(entries) = std::fs::read_dir(repo.join("web/dist")) {
         for entry in entries.flatten() {
@@ -606,24 +609,10 @@ fn kill_proc(pid: u32) {
 
 /// `spire hook` — stdin에서 hook JSON을 읽고 Rust 서버에 POST
 pub fn handle_hook() {
-    let input = {
-        let mut buf = String::new();
-        if io::stdin().read_line(&mut buf).is_err() || buf.trim().is_empty() {
-            // stdin에서 한 줄만 읽으면 안 되고 전체를 읽어야 함
-            buf.clear();
-        }
-        // 전체 stdin 읽기
-        if buf.is_empty() {
-            let mut full = String::new();
-            io::Read::read_to_string(&mut io::stdin(), &mut full).ok();
-            full
-        } else {
-            // 첫 줄 이후 나머지도 읽기
-            let mut rest = String::new();
-            io::Read::read_to_string(&mut io::stdin(), &mut rest).ok();
-            format!("{}{}", buf, rest)
-        }
-    };
+    let mut input = String::new();
+    if io::Read::read_to_string(&mut io::stdin(), &mut input).is_err() {
+        return;
+    }
 
     let input = input.trim();
     if input.is_empty() {
@@ -651,18 +640,14 @@ pub fn handle_hook() {
 
     let prefs = load_prefs();
     let url = format!("http://localhost:{}/api/hooks/event", prefs.port);
+    let body = json.to_string();
 
-    let client = reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(3))
-        .build();
-
-    if let Ok(client) = client {
-        let _ = client
-            .post(&url)
-            .header("Content-Type", "application/json")
-            .body(json.to_string())
-            .send();
-    }
+    // reqwest::blocking 대신 curl — Claude Code Hook 환경에서 더 안정적
+    let _ = std::process::Command::new("curl")
+        .args(["-sf", "-X", "POST", &url, "-H", "Content-Type: application/json", "-d", &body, "--max-time", "2"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn(); // fire-and-forget
 }
 
 fn find_bridge_path() -> Option<String> {

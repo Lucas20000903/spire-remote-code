@@ -6,20 +6,39 @@
 @custom-variant dark (&:is(.dark *));
 
 /* Fix mobile viewport */
-html {
-  height: 100vh;
-  height: 100dvh;
-}
-body {
-  height: 100%;
+html, body, #root {
   margin: 0;
-  overflow-x: hidden;
-  overscroll-behavior-x: none;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
 }
+
+/*
+ * iOS PWA safe-area fix (viewport-fit=cover + black-translucent)
+ *
+ * 문제: iOS standalone PWA에서 viewport-fit=cover + black-translucent를 사용하면
+ * 콘텐츠가 상단 safe area(노치/Dynamic Island) 뒤로 올라가지만,
+ * layout viewport의 높이는 원래 safe viewport 크기 그대로라서
+ * 하단 home indicator 영역까지 확장되지 않는다.
+ * → 하단에 흰색 빈 공간(white gap)이 생김.
+ *
+ * 해결:
+ * 1) html에 background-color 설정 → iOS가 layout viewport 바깥 영역
+ *    (home indicator 뒤)을 이 색으로 채움
+ * 2) min-height에 safe-area-inset-top만큼 추가 → 문서가 물리 화면 전체를 채움
+ */
+html {
+  min-height: calc(100% + env(safe-area-inset-top));
+  background-color: var(--background);
+}
+
+/* viewport-fit=cover에서 전체 물리 화면 채우기 */
 #root {
-  height: 100vh;
-  height: 100dvh;
-  overflow-x: hidden;
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
 }
 
 @theme inline {
