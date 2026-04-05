@@ -1,12 +1,28 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { motion } from 'motion/react'
 import { fetchProjects, fetchFavorites, addFavorite, removeFavorite } from '@/lib/api'
-import { FolderOpen, Star, Search } from 'lucide-react'
+import { FolderOpen, Star, Search, Clock } from 'lucide-react'
 import { useSessions } from '@/hooks/use-sessions'
+import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+  DialogClose,
+} from '@/components/ui/dialog'
 
 interface Project {
   name: string
   path: string
+}
+
+function extractProjectName(cwd: string): string {
+  const parts = cwd.split('/')
+  return parts[parts.length - 1] || cwd
 }
 
 export function ChatIntro() {
@@ -14,9 +30,11 @@ export function ChatIntro() {
   const [favorites, setFavorites] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(true)
   const [query, setQuery] = useState('')
-  const { createSession } = useSessions()
+  const navigate = useNavigate()
+  const { createSession, recent, active } = useSessions()
   const [scrollShadow, setScrollShadow] = useState({ top: false, bottom: false })
   const scrollRef = useRef<HTMLDivElement>(null)
+  const [confirmProject, setConfirmProject] = useState<{ name: string; path: string } | null>(null)
 
   const updateScrollShadow = useCallback(() => {
     const el = scrollRef.current
@@ -86,6 +104,43 @@ export function ChatIntro() {
         <p className="mt-3 text-sm text-muted-foreground">Select a workspace to start</p>
       </motion.div>
 
+      {/* Recent Sessions */}
+      {recent.length > 0 && (
+        <motion.div
+          className="mb-6 w-full max-w-sm shrink-0"
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.35, delay: 0.08, ease: [0.25, 0.1, 0.25, 1] }}
+        >
+          <p className="mb-2 px-1 text-xs font-medium text-muted-foreground">Recent</p>
+          <div className="space-y-1.5">
+            {recent.slice(0, 3).map((s) => (
+              <button
+                key={s.bridge_id || s.id}
+                onClick={() => {
+                  // active 세션 중 같은 cwd가 있으면 바로 이동
+                  const match = active.find((a) => a.cwd === s.cwd)
+                  if (match) {
+                    navigate(`/chat/${match.bridge_id}`)
+                  } else {
+                    setConfirmProject({ name: extractProjectName(s.cwd), path: s.cwd })
+                  }
+                }}
+                className="flex w-full items-center gap-3 rounded-xl border p-3 text-left transition-colors hover:bg-muted/50"
+              >
+                <Clock className="h-4 w-4 shrink-0 text-muted-foreground" />
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-medium">{extractProjectName(s.cwd)}</div>
+                  <div className="truncate text-xs text-muted-foreground">
+                    {s.lastUserMessage || 'No messages'}
+                  </div>
+                </div>
+              </button>
+            ))}
+          </div>
+        </motion.div>
+      )}
+
       <motion.div
         className="mb-4 w-full max-w-sm shrink-0"
         initial={{ opacity: 0, y: 12 }}
@@ -126,7 +181,7 @@ export function ChatIntro() {
         {filtered.map((p) => (
           <button
             key={p.path}
-            onClick={() => createSession(p.path)}
+            onClick={() => setConfirmProject({ name: p.name, path: p.path })}
             className="flex w-full items-center gap-3 rounded-xl border p-3.5 text-left transition-colors hover:bg-muted/50"
           >
             <FolderOpen className="h-5 w-5 shrink-0 text-muted-foreground" />
@@ -149,6 +204,40 @@ export function ChatIntro() {
           <div className="pointer-events-none absolute inset-x-0 bottom-0 z-[5] h-6" style={{ background: 'linear-gradient(to top, var(--color-background), transparent)' }} />
         )}
       </motion.div>
+
+      {/* Create Session Confirmation */}
+      <Dialog open={!!confirmProject} onOpenChange={(open) => { if (!open) setConfirmProject(null) }}>
+        <DialogContent showCloseButton={false}>
+          <DialogHeader>
+            <DialogTitle>새 세션 시작</DialogTitle>
+            <DialogDescription>
+              새 Claude Code 세션을 시작하시겠습니까?
+            </DialogDescription>
+          </DialogHeader>
+          <div className="rounded-lg border p-3">
+            <div className="flex items-center gap-2">
+              <FolderOpen className="h-4 w-4 shrink-0 text-muted-foreground" />
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-medium">{confirmProject?.name}</div>
+                <div className="truncate text-xs text-muted-foreground">{confirmProject?.path}</div>
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button variant="outline">취소</Button>
+            </DialogClose>
+            <Button
+              onClick={() => {
+                if (confirmProject) createSession(confirmProject.path)
+                setConfirmProject(null)
+              }}
+            >
+              시작
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

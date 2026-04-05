@@ -46,6 +46,15 @@ pub fn init_db(path: &Path) -> anyhow::Result<DbPool> {
         );
         CREATE INDEX IF NOT EXISTS idx_session_cwd ON session(cwd);
         CREATE INDEX IF NOT EXISTS idx_session_pid ON session(pid);
+        CREATE TABLE IF NOT EXISTS session_visit (
+            id INTEGER PRIMARY KEY,
+            cwd TEXT NOT NULL,
+            session_id TEXT,
+            last_user_message TEXT NOT NULL DEFAULT '',
+            visited_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_session_visit_cwd ON session_visit(cwd);
+        CREATE INDEX IF NOT EXISTS idx_session_visit_visited ON session_visit(visited_at DESC);
         CREATE TABLE IF NOT EXISTS hook_status (
             session_id TEXT PRIMARY KEY,
             status TEXT NOT NULL DEFAULT 'unknown',

@@ -8,6 +8,7 @@ export type WsClientMessage =
   | { type: 'subscribe'; session_id: string }
   | { type: 'unsubscribe'; session_id: string }
   | { type: 'permission_response'; bridge_id: string; request_id: string; behavior: 'allow' | 'deny' }
+  | { type: 'visit_session'; cwd: string; session_id?: string; last_user_message?: string }
 
 export type WsServerMessage =
   | { type: 'sessions'; active: SessionInfo[]; recent: SessionInfo[] }

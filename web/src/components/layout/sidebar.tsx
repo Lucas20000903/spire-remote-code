@@ -6,6 +6,16 @@ import { useWebSocket } from '@/hooks/use-websocket'
 import { fetchFavorites } from '@/lib/api'
 import { Plus, Star, Loader2, Settings, LogOut, Bot, TerminalSquare, X } from 'lucide-react'
 import { SettingsDialog } from '@/components/settings/settings-dialog'
+import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+  DialogClose,
+} from '@/components/ui/dialog'
 import type { SessionInfo, SessionStatus } from '@/lib/types'
 
 function extractProjectName(cwd: string): string {
@@ -60,6 +70,7 @@ export function SidebarContent({ onSelect }: SidebarContentProps) {
   const [scrollShadow, setScrollShadow] = useState({ top: false, bottom: false })
   const scrollRef = useRef<HTMLDivElement>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [closeTarget, setCloseTarget] = useState<SessionInfo | null>(null)
 
   // 페이지 focus 시 favorites refetch (폴링 대신)
   useEffect(() => {
@@ -188,12 +199,7 @@ export function SidebarContent({ onSelect }: SidebarContentProps) {
                     <button
                       onClick={(e) => {
                         e.stopPropagation()
-                        if (!confirm('이 세션을 종료하시겠습니까?')) return
-                        if (selected) {
-                          navigate('/chat/intro')
-                          onSelect?.()
-                        }
-                        closeSession(s.bridge_id)
+                        setCloseTarget(s)
                       }}
                       className="shrink-0 mr-2 rounded p-1 text-muted-foreground/0 group-hover/session:text-muted-foreground hover:!text-foreground hover:bg-muted/50 transition-colors"
                     >
@@ -229,6 +235,56 @@ export function SidebarContent({ onSelect }: SidebarContentProps) {
       </div>
 
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
+
+      {/* Close Session Confirmation */}
+      <Dialog open={!!closeTarget} onOpenChange={(open) => { if (!open) setCloseTarget(null) }}>
+        <DialogContent showCloseButton={false}>
+          <DialogHeader>
+            <DialogTitle>세션 종료</DialogTitle>
+            <DialogDescription>
+              이 세션을 종료하시겠습니까?
+            </DialogDescription>
+          </DialogHeader>
+          {closeTarget && (
+            <div className="rounded-lg border p-3">
+              <div className="flex items-center gap-2">
+                <StatusIndicator status={closeTarget.status} />
+                {closeTarget.command === 'claude' ? (
+                  <Bot className="h-3.5 w-3.5 shrink-0 text-violet-400" />
+                ) : closeTarget.command ? (
+                  <TerminalSquare className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
+                ) : null}
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-medium">{extractProjectName(closeTarget.cwd)}</div>
+                  <div className="truncate text-xs text-muted-foreground">
+                    {closeTarget.lastUserMessage || 'New Session'}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button variant="outline">취소</Button>
+            </DialogClose>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                if (closeTarget) {
+                  if (closeTarget.bridge_id === bridgeId) {
+                    navigate('/chat/intro')
+                    onSelect?.()
+                  }
+                  closeSession(closeTarget.bridge_id, closeTarget.tmux_session)
+                }
+                setCloseTarget(null)
+              }}
+            >
+              종료
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

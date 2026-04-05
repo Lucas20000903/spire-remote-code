@@ -94,6 +94,9 @@ pub async fn handle_ws(ws: WebSocket, state: Arc<AppState>) {
                             );
                         }
                     }
+                    Some("visit_session") => {
+                        handle_visit_session(&state, &parsed);
+                    }
                     _ => {}
                 }
             }
@@ -142,10 +145,19 @@ async fn handle_list_sessions(
     let tmux_sessions = terminal::list_tmux_sessions().await;
 
     // Hook DB: tmux_session → (session_id, status, last_prompt, updated_at) 매핑
+    // 같은 tmux_session에 여러 hook_status 항목이 있을 수 있으므로 (resume 등) 가장 최근 것만 사용
     let hook_map: std::collections::HashMap<String, (String, String, String, String)> = {
         let db = state.db.lock().unwrap();
         let mut stmt = db.prepare(
-            "SELECT tmux_session, session_id, status, last_prompt, updated_at FROM hook_status WHERE tmux_session != ''"
+            "SELECT h.tmux_session, h.session_id, h.status, h.last_prompt, h.updated_at \
+             FROM hook_status h \
+             INNER JOIN ( \
+                 SELECT tmux_session, MAX(updated_at) as max_updated \
+                 FROM hook_status \
+                 WHERE tmux_session != '' \
+                 GROUP BY tmux_session \
+             ) latest ON h.tmux_session = latest.tmux_session AND h.updated_at = latest.max_updated \
+             WHERE h.tmux_session != ''"
         ).unwrap();
         stmt.query_map([], |r| {
             Ok((
@@ -186,9 +198,10 @@ async fn handle_list_sessions(
             (0, false)
         };
 
-        // session_id: Bridge(정확) > Hook > None
-        let session_id = bridge.and_then(|b| b.session_id.clone())
-            .or(hook_session_id);
+        // session_id: Hook(최신, resume 후에도 정확) > Bridge(등록 시점, stale 가능) > None
+        let session_id = hook_session_id
+            .or(bridge.and_then(|b| b.session_id.clone()));
+        tracing::debug!("list_sessions: tmux={} session_id={:?} has_bridge={}", ts.name, session_id, has_bridge);
 
         // Hook DB status를 우선 사용 (정확), fallback으로 JSONL 파싱
         // 진행 중 상태가 5분 이상 오래됐으면 stale로 판단 → JSONL fallback
@@ -255,10 +268,32 @@ async fn handle_list_sessions(
         }));
     }
 
+    // 최근 방문 세션 조회 (최신 3개, cwd 기준 중복 제거)
+    let recent_visits: Vec<serde_json::Value> = {
+        let db = state.db.lock().unwrap();
+        let mut stmt = db.prepare(
+            "SELECT cwd, session_id, last_user_message, MAX(visited_at) as visited_at \
+             FROM session_visit \
+             GROUP BY cwd \
+             ORDER BY visited_at DESC \
+             LIMIT 3"
+        ).unwrap();
+        stmt.query_map([], |r| {
+            Ok(serde_json::json!({
+                "cwd": r.get::<_, String>(0)?,
+                "id": r.get::<_, Option<String>>(1)?,
+                "lastUserMessage": r.get::<_, String>(2)?,
+                "bridge_id": format!("recent-{}", r.get::<_, String>(0)?),
+                "port": 0,
+                "status": "idle",
+            }))
+        }).unwrap().filter_map(|r| r.ok()).collect()
+    };
+
     let msg = serde_json::json!({
         "type": "sessions",
         "active": active,
-        "recent": [],
+        "recent": recent_visits,
     });
     let _ = tx.send(serde_json::to_string(&msg).unwrap()).await;
 
@@ -574,6 +609,35 @@ async fn handle_close_session(
             "error": output.err().map(|e| e.to_string()).unwrap_or_default(),
         });
         let _ = tx.send(serde_json::to_string(&resp).unwrap()).await;
+    }
+}
+
+/// 세션 방문 기록 저장
+fn handle_visit_session(state: &AppState, msg: &serde_json::Value) {
+    let cwd = match msg["cwd"].as_str() {
+        Some(c) if !c.is_empty() => c,
+        _ => {
+            tracing::warn!("visit_session: cwd 없음, msg={}", msg);
+            return;
+        }
+    };
+    tracing::info!("visit_session: cwd={}", cwd);
+    let session_id = msg["session_id"].as_str();
+    let last_user_message = msg["last_user_message"].as_str().unwrap_or("");
+
+    let db = state.db.lock().unwrap();
+    // 같은 cwd 최근 방문이 있으면 업데이트, 없으면 삽입
+    let updated = db.execute(
+        "UPDATE session_visit SET session_id = ?2, last_user_message = ?3, visited_at = datetime('now') \
+         WHERE id = (SELECT id FROM session_visit WHERE cwd = ?1 ORDER BY visited_at DESC LIMIT 1)",
+        rusqlite::params![cwd, session_id, last_user_message],
+    ).unwrap_or(0);
+
+    if updated == 0 {
+        let _ = db.execute(
+            "INSERT INTO session_visit (cwd, session_id, last_user_message) VALUES (?1, ?2, ?3)",
+            rusqlite::params![cwd, session_id, last_user_message],
+        );
     }
 }
 

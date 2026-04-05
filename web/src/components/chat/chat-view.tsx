@@ -62,6 +62,17 @@ export function ChatView() {
     if (bridgeId) markSeen(bridgeId)
   }, [bridgeId, markSeen])
 
+  // 세션 방문 기록 전송
+  useEffect(() => {
+    if (!session) return
+    send({
+      type: 'visit_session',
+      cwd: session.cwd,
+      session_id: session.id || undefined,
+      last_user_message: session.lastUserMessage || undefined,
+    } as any)
+  }, [session?.bridge_id])
+
   // session.id가 설정되면 history 로드 (auto-match 완료 후)
   const actualSessionId = session?.id
   useEffect(() => {

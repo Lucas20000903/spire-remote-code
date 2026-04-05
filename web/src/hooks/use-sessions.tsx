@@ -10,7 +10,7 @@ interface SessionsContextValue {
   active: SessionInfo[]
   recent: SessionInfo[]
   createSession: (cwd: string) => void
-  closeSession: (bridgeId: string) => void
+  closeSession: (bridgeId: string, tmuxSession?: string) => void
   findByBridgeId: (bridgeId: string) => SessionInfo | undefined
   completedCount: number
   markSeen: (bridgeId: string) => void
@@ -156,6 +156,11 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
         const hookStatus = hookToSessionStatus(msg.status)
         const sid = msg.session_id
 
+        // SessionStart: 새 세션이 시작됐을 수 있음 → 목록 갱신
+        if ((msg as any).event === 'SessionStart') {
+          send({ type: 'list_sessions' })
+        }
+
         setActive((prev) => {
           const target = prev.find((s) => s.id === sid)
           if (!target) return prev
@@ -197,12 +202,12 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
   )
 
   const closeSession = useCallback(
-    (bridgeId: string) => {
-      const session = active.find((s) => s.bridge_id === bridgeId)
-      if (!session?.tmux_session) return
+    (bridgeId: string, tmuxSession?: string) => {
+      const tmux = tmuxSession || active.find((s) => s.bridge_id === bridgeId)?.tmux_session
+      if (!tmux) return
       // Optimistic: 즉시 목록에서 제거
       setActive((prev) => prev.filter((s) => s.bridge_id !== bridgeId))
-      send({ type: 'close_session', tmux_session: session.tmux_session } as any)
+      send({ type: 'close_session', tmux_session: tmux } as any)
     },
     [active, send],
   )
